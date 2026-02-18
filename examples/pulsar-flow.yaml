@@ -1,0 +1,37 @@
+# Pulsar flow with reader for intermediary hop
+name: pulsar-flow-with-reader
+message_headers:
+  source: perf-tool
+  type: test
+
+hops:
+  # First hop: publish to Pulsar
+  - name: initial-publish
+    destination:
+      type: pulsar
+      topic: persistent://public/default/test-input
+      config:
+        service_url: pulsar://localhost:6650
+        use_reader: false
+    validation:
+      type: exists
+
+  # Second hop: use reader for intermediary consumption
+  - name: pulsar-intermediary
+    source:
+      type: pulsar
+      topic: persistent://public/default/test-input
+      config:
+        service_url: pulsar://localhost:6650
+        use_reader: true  # Use reader as specified in requirements
+    destination:
+      type: pulsar
+      topic: persistent://public/default/test-output
+      config:
+        service_url: pulsar://localhost:6650
+    validation:
+      type: json_schema
+      params:
+        required_fields:
+          - id
+          - timestamp

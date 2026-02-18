@@ -1,0 +1,59 @@
+# Multi-system flow: Kafka -> Pulsar -> RabbitMQ
+name: multi-system-flow
+message_headers:
+  flow-id: multi-001
+  priority: high
+
+hops:
+  # Hop 1: Publish to Kafka
+  - name: kafka-publish
+    destination:
+      type: kafka
+      topic: kafka-input
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: exists
+
+  # Hop 2: Kafka -> Pulsar (with Pulsar reader)
+  - name: kafka-to-pulsar
+    source:
+      type: kafka
+      topic: kafka-input
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    destination:
+      type: pulsar
+      topic: persistent://public/default/pulsar-intermediate
+      config:
+        service_url: pulsar://localhost:6650
+    validation:
+      type: contains
+      params:
+        text: "test"
+
+  # Hop 3: Pulsar -> RabbitMQ (using Pulsar reader for intermediary hop)
+  - name: pulsar-to-rabbitmq
+    source:
+      type: pulsar
+      topic: persistent://public/default/pulsar-intermediate
+      config:
+        service_url: pulsar://localhost:6650
+        use_reader: true  # Use reader for intermediary hop
+    destination:
+      type: rabbitmq
+      topic: rabbitmq-output
+      config:
+        host: localhost
+        port: 5672
+        username: guest
+        password: guest
+        exchange: test-exchange
+        exchange_type: topic
+    validation:
+      type: size
+      params:
+        min_bytes: 10
+        max_bytes: 10000
