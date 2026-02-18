@@ -4,7 +4,7 @@ A generic pub-sub performance testing tool with a focus on validation across mul
 
 ## Features
 
-- **Multi-System Support**: Works with Kafka, Pulsar, RabbitMQ, and Iggy
+- **Multi-System Support**: Works with Kafka, Pulsar, RabbitMQ, Iggy, Azure EventHubs, Google Pub/Sub, and StreamNative
 - **Abstraction Layer**: Seamless interface across different pub-sub systems
 - **Message Flow Definition**: Define complex flows with multiple intermediary hops
 - **Validation Framework**: Validate messages between each hop
@@ -31,6 +31,24 @@ A generic pub-sub performance testing tool with a focus on validation across mul
 ### Iggy Support
 - Basic message streaming support
 - Stream and topic configuration
+
+### Azure EventHubs Support
+- Azure Event Hubs integration with connection string authentication
+- Consumer group support (default: $Default)
+- Event batch publishing and consumption
+- Message properties and partition key support
+
+### Google Pub/Sub Support
+- Google Cloud Pub/Sub integration
+- Service account or default credentials authentication
+- Automatic subscription creation and management
+- Message attributes and acknowledgment handling
+
+### StreamNative Support
+- StreamNative Cloud (managed Pulsar) integration
+- OAuth2, token, and TLS authentication support
+- Reader mode for intermediary hops
+- Full Pulsar feature compatibility
 
 ## Installation
 
@@ -74,7 +92,7 @@ message_headers:
 hops:
   - name: initial-publish
     destination:
-      type: kafka  # or pulsar, rabbitmq, iggy
+      type: kafka  # or pulsar, rabbitmq, iggy, eventhubs, googlepubsub, streamnative
       topic: topic-name
       config:
         # Client-specific configuration
@@ -215,6 +233,106 @@ hops:
         port: 5672
 ```
 
+### Azure EventHubs Flow
+
+```yaml
+name: eventhubs-flow
+hops:
+  - name: publish-to-eventhubs
+    destination:
+      type: eventhubs
+      topic: test-eventhub
+      config:
+        connection_string: Endpoint=sb://my-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mykey
+        eventhub_name: test-eventhub
+        consumer_group: $Default
+
+  - name: eventhubs-to-kafka
+    source:
+      type: eventhubs
+      topic: test-eventhub
+      config:
+        connection_string: Endpoint=sb://my-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mykey
+        eventhub_name: test-eventhub
+        consumer_group: $Default
+    destination:
+      type: kafka
+      topic: output-topic
+      config:
+        bootstrap_servers: [localhost:9092]
+```
+
+### Google Pub/Sub Flow
+
+```yaml
+name: googlepubsub-flow
+hops:
+  - name: publish-to-pubsub
+    destination:
+      type: googlepubsub
+      topic: test-topic
+      config:
+        project_id: my-gcp-project
+        credentials_path: /path/to/service-account.json
+
+  - name: pubsub-to-pulsar
+    source:
+      type: googlepubsub
+      topic: test-topic
+      config:
+        project_id: my-gcp-project
+        credentials_path: /path/to/service-account.json
+    destination:
+      type: pulsar
+      topic: persistent://public/default/output
+      config:
+        service_url: pulsar://localhost:6650
+```
+
+### StreamNative Flow (Managed Pulsar with OAuth2)
+
+```yaml
+name: streamnative-flow
+hops:
+  - name: publish-to-streamnative
+    destination:
+      type: streamnative
+      topic: persistent://public/default/input
+      config:
+        service_url: pulsar+ssl://my-org.streamnative.cloud:6651
+        auth_params:
+          type: oauth2
+          issuer_url: https://auth.streamnative.cloud
+          client_id: my-client-id
+          client_secret: my-client-secret
+          audience: urn:sn:pulsar:my-org:my-instance
+
+  - name: streamnative-intermediary
+    source:
+      type: streamnative
+      topic: persistent://public/default/input
+      config:
+        service_url: pulsar+ssl://my-org.streamnative.cloud:6651
+        auth_params:
+          type: oauth2
+          issuer_url: https://auth.streamnative.cloud
+          client_id: my-client-id
+          client_secret: my-client-secret
+          audience: urn:sn:pulsar:my-org:my-instance
+        use_reader: true  # Use reader for intermediary hop
+    destination:
+      type: streamnative
+      topic: persistent://public/default/output
+      config:
+        service_url: pulsar+ssl://my-org.streamnative.cloud:6651
+        auth_params:
+          type: oauth2
+          issuer_url: https://auth.streamnative.cloud
+          client_id: my-client-id
+          client_secret: my-client-secret
+          audience: urn:sn:pulsar:my-org:my-instance
+```
+
 ## CLI Commands
 
 ### run
@@ -238,7 +356,7 @@ Generate a sample configuration file.
 pub-sub-perf generate-config OUTPUT_FILE [OPTIONS]
 
 Options:
-  -t, --type [kafka|pulsar|rabbitmq|iggy]  Client types to include (multiple allowed)
+  -t, --type [kafka|pulsar|rabbitmq|iggy|eventhubs|googlepubsub|streamnative]  Client types to include (multiple allowed)
 ```
 
 ### validate-config
@@ -298,7 +416,10 @@ pub_sub_perf_tool/
     ├── kafka_client.py
     ├── pulsar_client.py
     ├── rabbitmq_client.py
-    └── iggy_client.py
+    ├── iggy_client.py
+    ├── eventhubs_client.py
+    ├── googlepubsub_client.py
+    └── streamnative_client.py
 ```
 
 ### Running Tests
