@@ -1,0 +1,44 @@
+# RabbitMQ flow example
+name: rabbitmq-flow
+message_headers:
+  content-type: application/json
+
+hops:
+  # First hop: publish to RabbitMQ
+  - name: initial-publish
+    destination:
+      type: rabbitmq
+      topic: test.input
+      config:
+        host: localhost
+        port: 5672
+        username: guest
+        password: guest
+        exchange: test-exchange
+        exchange_type: topic
+    validation:
+      type: exists
+
+  # Second hop: RabbitMQ to RabbitMQ
+  - name: rabbitmq-routing
+    source:
+      type: rabbitmq
+      topic: test.input
+      config:
+        host: localhost
+        port: 5672
+        username: guest
+        password: guest
+        exchange: test-exchange
+    destination:
+      type: rabbitmq
+      topic: test.output
+      config:
+        host: localhost
+        port: 5672
+        username: guest
+        password: guest
+        exchange: test-exchange
+        exchange_type: topic
+    validation:
+      type: exists

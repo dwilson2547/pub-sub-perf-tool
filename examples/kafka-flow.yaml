@@ -1,0 +1,38 @@
+# Simple Kafka flow
+name: kafka-simple-flow
+message_headers:
+  source: perf-tool
+  version: "1.0"
+
+hops:
+  # First hop: publish to Kafka
+  - name: initial-publish
+    destination:
+      type: kafka
+      topic: test-input
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: exists
+
+  # Second hop: consume from Kafka and publish to another topic
+  - name: kafka-to-kafka
+    source:
+      type: kafka
+      topic: test-input
+      config:
+        bootstrap_servers:
+          - localhost:9092
+        # consumer_group is auto-generated if not specified
+    destination:
+      type: kafka
+      topic: test-output
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: size
+      params:
+        min_bytes: 1
+        max_bytes: 1000000
