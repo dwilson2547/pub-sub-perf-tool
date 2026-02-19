@@ -434,7 +434,13 @@ pytest tests/ --ignore=tests/integration
 
 #### Integration Tests with Testcontainers
 
-Integration tests use [Testcontainers](https://testcontainers.com/) to run real message broker instances in Docker containers. These tests validate end-to-end functionality with Kafka, RabbitMQ, and Pulsar.
+Integration tests use [Testcontainers](https://testcontainers.com/) to run real message broker instances in Docker containers. These tests **demonstrate the tool's core value**: monitoring messages as they transform through systems, tracking latency and content changes at each hop.
+
+**What the tests validate:**
+- **Message Transformation Tracking**: Monitor how messages are enriched, transformed, filtered, and routed
+- **Performance Metrics**: Latency tracking, throughput measurement, message ordering
+- **Validation Framework**: All validation types (exists, contains, json_schema, size)
+- **Real-World Scenarios**: Microservices events, data pipelines, log aggregation
 
 **Prerequisites:**
 - Docker must be installed and running
@@ -446,20 +452,40 @@ Integration tests use [Testcontainers](https://testcontainers.com/) to run real 
 pytest tests/integration/ -v
 ```
 
-**Run specific integration tests:**
+**Run specific test categories:**
 
 ```bash
-# Test Kafka integration
+# Message transformation tracking (demonstrates monitoring)
+pytest tests/integration/test_message_transformation_tracking.py -v
+
+# Performance metrics validation
+pytest tests/integration/test_performance_metrics.py -v
+
+# Validation framework tests
+pytest tests/integration/test_validation_features.py -v
+
+# Real-world scenario examples
+pytest tests/integration/test_real_world_scenarios.py -v
+
+# Basic client tests
 pytest tests/integration/test_kafka_integration.py -v
-
-# Test RabbitMQ integration
 pytest tests/integration/test_rabbitmq_integration.py -v
-
-# Test Pulsar integration
 pytest tests/integration/test_pulsar_integration.py -v
+```
 
-# Test complete message flows
-pytest tests/integration/test_flow_integration.py -v
+**Example output from transformation tracking:**
+
+```
+=== Message Transformation Pipeline Report ===
+Latency at each stage:
+  publish_raw:         379ms
+  consume_raw:         405ms
+  publish_transformed: 116ms
+
+Message Evolution:
+1. Raw: {"name": "jane doe", "ssn": "123-45-6789"}
+2. After Transform: {"name": "JANE DOE"}  
+3. After Filter: {"ssn": "***REDACTED***"}
 ```
 
 **Run all tests (unit + integration):**
