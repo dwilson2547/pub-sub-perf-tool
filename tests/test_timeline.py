@@ -597,3 +597,225 @@ class TestTimelineCaptureMultiWorker:
             )
 
         assert counts == [1]
+
+
+# ---------------------------------------------------------------------------
+# Flow engine – compressed .timeline format and base-path glob
+# ---------------------------------------------------------------------------
+
+class TestFlowEngineCompressedTimeline:
+    """Verify that the flow engine replays compressed timeline files."""
+
+    def _mock_client(self):
+        from pub_sub_perf_tool.base import PublishResult
+        mc = MagicMock()
+        mc.__enter__ = MagicMock(return_value=mc)
+        mc.__exit__ = MagicMock(return_value=False)
+        mc.publish.return_value = PublishResult(success=True, latency_ms=1.0)
+        return mc
+
+    def _flow_config(self, source: str) -> dict:
+        return {
+            'name': 'test-flow',
+            'hops': [
+                {
+                    'name': 'replay',
+                    'source': source,
+                    'destination': {
+                        'type': 'kafka',
+                        'topic': 'out-topic',
+                        'config': {'bootstrap_servers': ['localhost:9092']},
+                    },
+                }
+            ],
+        }
+
+    def test_replay_compressed_single_file(self, tmp_path):
+        """engine.execute() should replay a single .timeline compressed file."""
+        writer = TimelineWriter(str(tmp_path / 'cap'), chunk_size=0, worker_id=0)
+        writer.open('kafka', 'src', '2024-01-01T00:00:00+00:00')
+        writer.write_entry(TimelineEntry(offset_ms=0.0, value=b'a'))
+        writer.write_entry(TimelineEntry(offset_ms=5.0, value=b'b'))
+        paths = writer.close()
+
+        engine = MessageFlowEngine(self._flow_config(f'timeline: {paths[0]}'))
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+
+        assert result.success
+        assert result.messages_processed == 2
+
+    def test_replay_base_path_discovers_part_files(self, tmp_path):
+        """A base path without extension should glob for _w*_p*.timeline files."""
+        base = str(tmp_path / 'cap')
+        writer = TimelineWriter(base, chunk_size=0, worker_id=0)
+        writer.open('kafka', 'src', '2024-01-01T00:00:00+00:00')
+        for i in range(3):
+            writer.write_entry(TimelineEntry(offset_ms=float(i * 10), value=f'v{i}'.encode()))
+        writer.close()
+
+        engine = MessageFlowEngine(self._flow_config(f'timeline: {base}'))
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+
+        assert result.success
+        assert result.messages_processed == 3
+
+    def test_replay_base_path_multiple_workers(self, tmp_path):
+        """All workers' entries should be replayed when num_pods == 1."""
+        base = str(tmp_path / 'cap')
+        for wid in range(3):
+            w = TimelineWriter(base, chunk_size=0, worker_id=wid)
+            w.open('kafka', 'src', '2024-01-01T00:00:00+00:00')
+            w.write_entry(TimelineEntry(offset_ms=0.0, value=f'w{wid}'.encode()))
+            w.write_entry(TimelineEntry(offset_ms=10.0, value=f'w{wid}-2'.encode()))
+            w.close()
+
+        engine = MessageFlowEngine(self._flow_config(f'timeline: {base}'))
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+
+        assert result.success
+        assert result.messages_processed == 6  # 3 workers × 2 entries each
+
+    def test_base_path_no_files_raises(self, tmp_path):
+        """ValueError should be raised when no part files are found."""
+        from pub_sub_perf_tool.flow_engine import MessageFlowEngine
+        engine = MessageFlowEngine(self._flow_config(f'timeline: {tmp_path / "missing"}'))
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+        assert not result.success
+
+
+# ---------------------------------------------------------------------------
+# Flow engine – multi-pod timeline distribution
+# ---------------------------------------------------------------------------
+
+class TestFlowEngineMultiPod:
+    """Verify that pod_id / num_pods correctly partitions worker files."""
+
+    def _mock_client(self):
+        from pub_sub_perf_tool.base import PublishResult
+        mc = MagicMock()
+        mc.__enter__ = MagicMock(return_value=mc)
+        mc.__exit__ = MagicMock(return_value=False)
+        mc.publish.return_value = PublishResult(success=True, latency_ms=1.0)
+        return mc
+
+    def _make_capture(self, tmp_path, num_workers=4, entries_per_worker=2):
+        base = str(tmp_path / 'cap')
+        for wid in range(num_workers):
+            w = TimelineWriter(base, chunk_size=0, worker_id=wid)
+            w.open('kafka', 'src', '2024-01-01T00:00:00+00:00')
+            for i in range(entries_per_worker):
+                w.write_entry(TimelineEntry(offset_ms=float(i * 10), value=f'w{wid}m{i}'.encode()))
+            w.close()
+        return base
+
+    def test_two_pods_process_disjoint_subsets(self, tmp_path):
+        """Two pods with num_pods=2 together process all entries exactly once."""
+        base = self._make_capture(tmp_path, num_workers=4, entries_per_worker=2)
+
+        counts = []
+        for pod_id in range(2):
+            cfg = {
+                'name': 'flow',
+                'hops': [{
+                    'name': 'replay',
+                    'source': f'timeline: {base}',
+                    'pod_id': pod_id,
+                    'num_pods': 2,
+                    'destination': {
+                        'type': 'kafka',
+                        'topic': 'out',
+                        'config': {'bootstrap_servers': ['localhost:9092']},
+                    },
+                }],
+            }
+            engine = MessageFlowEngine(cfg)
+            with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+                result = engine.execute()
+            assert result.success
+            counts.append(result.messages_processed)
+
+        # Each pod gets 2 workers × 2 entries = 4; total = 8
+        assert sum(counts) == 8
+        # Both pods get equal share
+        assert counts[0] == counts[1]
+
+    def test_pod_id_from_flow_config(self, tmp_path):
+        """pod_id / num_pods set at the flow level (not hop level) are respected."""
+        base = self._make_capture(tmp_path, num_workers=4, entries_per_worker=1)
+
+        cfg = {
+            'name': 'flow',
+            'pod_id': 1,
+            'num_pods': 4,
+            'hops': [{
+                'name': 'replay',
+                'source': f'timeline: {base}',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'out',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }],
+        }
+        engine = MessageFlowEngine(cfg)
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+
+        # pod_id=1 with num_pods=4 and 4 workers → gets worker index 1 only → 1 entry
+        assert result.success
+        assert result.messages_processed == 1
+
+    def test_hop_pod_config_overrides_flow_pod_config(self, tmp_path):
+        """pod_id / num_pods on the hop take precedence over the flow-level values."""
+        base = self._make_capture(tmp_path, num_workers=4, entries_per_worker=1)
+
+        cfg = {
+            'name': 'flow',
+            'pod_id': 99,   # should be ignored
+            'num_pods': 99,  # should be ignored
+            'hops': [{
+                'name': 'replay',
+                'source': f'timeline: {base}',
+                'pod_id': 0,
+                'num_pods': 2,
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'out',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }],
+        }
+        engine = MessageFlowEngine(cfg)
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+
+        # pod_id=0, num_pods=2, 4 workers → workers 0,2 → 2 entries
+        assert result.success
+        assert result.messages_processed == 2
+
+    def test_single_pod_default_processes_all(self, tmp_path):
+        """Default (pod_id=0, num_pods=1) processes all workers."""
+        base = self._make_capture(tmp_path, num_workers=3, entries_per_worker=2)
+
+        cfg = {
+            'name': 'flow',
+            'hops': [{
+                'name': 'replay',
+                'source': f'timeline: {base}',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'out',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }],
+        }
+        engine = MessageFlowEngine(cfg)
+        with patch('pub_sub_perf_tool.flow_engine.create_client', return_value=self._mock_client()):
+            result = engine.execute()
+
+        assert result.success
+        assert result.messages_processed == 6  # 3 workers × 2 entries

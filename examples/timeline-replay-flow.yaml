@@ -1,15 +1,35 @@
 # Example: replay a captured timeline into a Kafka topic
 #
 # Usage:
-#   1. Capture a timeline from a real topic:
+#   1. Capture a timeline from a real topic (single-threaded JSON):
 #        pub-sub-timeline capture capture.json \
 #            --source-type kafka \
 #            --topic live-topic \
 #            --config-file kafka-config.yaml \
 #            --max-messages 1000
 #
-#   2. Replay the timeline through this flow:
+#   2a. Capture a high-throughput timeline with multiple workers (compressed):
+#        pub-sub-timeline capture capture \
+#            --source-type kafka \
+#            --topic live-topic \
+#            --config-file kafka-config.yaml \
+#            --workers 4 \
+#            --chunk-size 100000
+#       This produces files: capture_w0_p0.timeline, capture_w1_p0.timeline, …
+#
+#   3. Replay the timeline through this flow (all formats supported):
 #        pub-sub-perf run timeline-replay-flow.yaml
+#
+# Timeline source formats:
+#   "timeline: capture.json"          – legacy JSON file
+#   "timeline: capture_w0_p0.timeline" – single compressed part file
+#   "timeline: capture"               – base path; all _w*_p*.timeline files
+#                                       are discovered and replayed
+#
+# Multi-pod replay:
+#   Set pod_id (0-based) and num_pods on the hop (or at the flow level) so
+#   each pod processes a disjoint subset of worker files.  Worker files are
+#   distributed round-robin across pods by sorted worker index.
 #
 # When a 'timeline:' source is used the --message / --count flags are
 # ignored and every captured entry is published at its original rate.
@@ -18,7 +38,9 @@ name: timeline-replay-flow
 
 hops:
   - name: replay-from-timeline
-    source: "timeline: capture.json"    # path to the captured timeline file
+    source: "timeline: capture"    # base path; discovers _w*_p*.timeline files
+    # pod_id: 0                    # uncomment for multi-pod (0-based index)
+    # num_pods: 1                  # uncomment for multi-pod (total pod count)
     destination:
       type: kafka
       topic: replay-topic

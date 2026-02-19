@@ -1,6 +1,8 @@
 """Message flow engine with validation support"""
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, Generator, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field
+import glob
+import re
 import time
 import json
 import copy
@@ -235,9 +237,10 @@ class MessageFlowEngine:
         first_hop_source = self.hops_config[0].get('source') if self.hops_config else None
         if isinstance(first_hop_source, str) and first_hop_source.startswith('timeline:'):
             timeline_path = first_hop_source[len('timeline:'):].strip()
-            from .timeline.timeline import Timeline  # local import to avoid circular dependency
-            timeline = Timeline.load(timeline_path)
-            return self._execute_with_timeline(timeline)
+            first_hop = self.hops_config[0]
+            pod_id = int(first_hop.get('pod_id', self.flow_config.get('pod_id', 0)))
+            num_pods = int(first_hop.get('num_pods', self.flow_config.get('num_pods', 1)))
+            return self._execute_with_timeline_path(timeline_path, pod_id, num_pods)
 
         if initial_message is None:
             raise ValueError("initial_message is required when not using a timeline source")
@@ -336,6 +339,156 @@ class MessageFlowEngine:
         flow_result.total_time_ms = (time.time() - start_time) * 1000
         return flow_result
     
+    def _execute_with_timeline_path(
+        self,
+        timeline_path: str,
+        pod_id: int = 0,
+        num_pods: int = 1,
+    ) -> FlowResult:
+        """Execute timeline replay from a file path.
+
+        Supports all timeline formats (JSON, compressed ``.timeline``, and
+        multi-part captures produced by :class:`TimelineWriter`).  When
+        *num_pods* > 1 each pod processes a disjoint subset of worker files
+        so pods can run concurrently without duplicating work.
+
+        Inter-message timing is preserved within each worker's data.  When
+        entries from a new worker begin, the timing clock resets to avoid
+        accumulating drift across independently-captured workers.
+
+        Args:
+            timeline_path: Path to a ``.json`` file, a single ``.timeline``
+                file, or a base path whose part files will be globbed.
+            pod_id: Zero-based index of this pod (default 0).
+            num_pods: Total number of pods sharing the timeline (default 1).
+
+        Returns:
+            FlowResult with execution details.
+        """
+        start_time = time.time()
+        flow_result = FlowResult(flow_name=self.flow_name, success=True)
+
+        playback_start: Optional[float] = None
+
+        try:
+            for entry, reset_timing in self._iter_timeline_entries(
+                timeline_path, pod_id, num_pods
+            ):
+                if playback_start is None or reset_timing:
+                    # Anchor the clock so entry.offset_ms maps to "now"
+                    playback_start = time.time() - entry.offset_ms / 1000.0
+
+                target_time = playback_start + entry.offset_ms / 1000.0
+                sleep_s = target_time - time.time()
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
+
+                current_message = Message(
+                    key=entry.key,
+                    value=entry.value,
+                    headers=entry.headers,
+                )
+
+                for hop_idx, hop_config in enumerate(self.hops_config):
+                    if hop_idx == 0:
+                        hop_cfg = {k: v for k, v in hop_config.items() if k != 'source'}
+                    else:
+                        hop_cfg = hop_config
+
+                    hop_result = self._execute_hop(hop_idx, hop_cfg, current_message)
+                    flow_result.hops.append(hop_result)
+
+                    if not hop_result.success:
+                        flow_result.success = False
+                        break
+
+                flow_result.messages_processed += 1
+
+        except Exception as e:
+            flow_result.success = False
+            flow_result.hops.append(HopResult(
+                hop_index=-1,
+                hop_name="error",
+                success=False,
+                error=str(e),
+            ))
+
+        flow_result.total_time_ms = (time.time() - start_time) * 1000
+        return flow_result
+
+    @staticmethod
+    def _iter_timeline_entries(
+        source_path: str,
+        pod_id: int = 0,
+        num_pods: int = 1,
+    ) -> Generator[Tuple[Any, bool], None, None]:
+        """Yield ``(TimelineEntry, reset_timing)`` pairs from a timeline source.
+
+        Handles three source formats:
+
+        * **JSON** (``*.json``) – legacy single-file format loaded entirely
+          into memory.
+        * **Compressed single file** (``*.timeline``) – msgpack + zstd part
+          file loaded entirely into memory.
+        * **Base path** – all ``<base>_w*_p*.timeline`` files are discovered,
+          worker IDs are distributed round-robin across *num_pods* pods, and
+          this pod streams the part files for its assigned workers one at a
+          time (low memory footprint for large captures).
+
+        ``reset_timing`` is ``True`` at the first entry from each new worker
+        (after the very first worker), signalling the caller to reset the
+        playback clock so per-worker offset values are interpreted correctly.
+        """
+        from .timeline.timeline import Timeline  # local import – avoids circular dependency
+
+        # -- Legacy JSON -------------------------------------------------------
+        if source_path.endswith('.json'):
+            tl = Timeline.load(source_path)
+            for entry in tl.entries:
+                yield entry, False
+            return
+
+        # -- Single compressed file --------------------------------------------
+        if source_path.endswith('.timeline'):
+            tl = Timeline.load_compressed(source_path)
+            for entry in tl.entries:
+                yield entry, False
+            return
+
+        # -- Base path: discover all worker/part files -------------------------
+        pattern = f"{source_path}_w*_p*.timeline"
+        all_files = sorted(glob.glob(pattern))
+
+        if not all_files:
+            raise ValueError(
+                f"No timeline part files found matching pattern: {pattern}"
+            )
+
+        # Group files by worker ID
+        worker_files: Dict[int, List[Tuple[int, str]]] = {}
+        for fpath in all_files:
+            m = re.search(r'_w(\d+)_p(\d+)\.timeline$', fpath)
+            if m:
+                wid, part = int(m.group(1)), int(m.group(2))
+                worker_files.setdefault(wid, []).append((part, fpath))
+
+        # Assign workers to this pod via round-robin on sorted worker index
+        sorted_worker_ids = sorted(worker_files)
+        my_worker_ids = [
+            wid
+            for i, wid in enumerate(sorted_worker_ids)
+            if i % num_pods == pod_id
+        ]
+
+        for worker_idx, wid in enumerate(my_worker_ids):
+            parts = sorted(worker_files[wid])  # sort by part number
+            for part_idx, (_part_num, fpath) in enumerate(parts):
+                tl = Timeline.load_compressed(fpath)
+                for entry_idx, entry in enumerate(tl.entries):
+                    # Signal timing reset at the first entry of each new worker
+                    reset = part_idx == 0 and entry_idx == 0 and worker_idx > 0
+                    yield entry, reset
+
     def _execute_hop(self, hop_index: int, hop_config: Dict[str, Any], message: Message) -> HopResult:
         """Execute a single hop
         
