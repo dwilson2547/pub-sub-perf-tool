@@ -18,13 +18,7 @@ hops:
 
   # Second hop: consume from Kafka and publish to another topic
   - name: kafka-to-kafka
-    source:
-      type: kafka
-      topic: test-input
-      config:
-        bootstrap_servers:
-          - localhost:9092
-        # consumer_group is auto-generated if not specified
+    source: "hop: initial-publish"
     destination:
       type: kafka
       topic: test-output

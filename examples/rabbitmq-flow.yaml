@@ -21,15 +21,7 @@ hops:
 
   # Second hop: RabbitMQ to RabbitMQ
   - name: rabbitmq-routing
-    source:
-      type: rabbitmq
-      topic: test.input
-      config:
-        host: localhost
-        port: 5672
-        username: guest
-        password: guest
-        exchange: test-exchange
+    source: "hop: initial-publish"
     destination:
       type: rabbitmq
       topic: test.output
