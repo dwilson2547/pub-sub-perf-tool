@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 import time
 import json
+import copy
 from enum import Enum
 
 from .base import PubSubClient, Message
@@ -211,7 +212,7 @@ class MessageFlowEngine:
                     
                     # Look up the referenced hop's destination
                     if referenced_hop in hop_destinations:
-                        hop_config['source'] = hop_destinations[referenced_hop].copy()
+                        hop_config['source'] = copy.deepcopy(hop_destinations[referenced_hop])
                     else:
                         raise ValueError(f"Cannot resolve hop reference: '{referenced_hop}' not found")
                 else:

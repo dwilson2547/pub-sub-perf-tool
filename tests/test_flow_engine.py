@@ -239,3 +239,47 @@ def test_backward_compatibility_with_full_source_config():
     assert engine.hops_config[1]['source']['type'] == 'kafka'
     assert engine.hops_config[1]['source']['topic'] == 'test-topic'
 
+
+def test_hop_reference_deep_copy():
+    """Test that hop references use deep copy to avoid side effects"""
+    flow_config = {
+        'name': 'test-flow',
+        'hops': [
+            {
+                'name': 'first-hop',
+                'destination': {
+                    'type': 'rabbitmq',
+                    'topic': 'test-topic',
+                    'config': {
+                        'host': 'localhost',
+                        'port': 5672,
+                        'nested': {
+                            'key': 'value',
+                            'list': [1, 2, 3]
+                        }
+                    }
+                }
+            },
+            {
+                'name': 'second-hop',
+                'source': 'hop: first-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'output-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            }
+        ]
+    }
+    
+    engine = MessageFlowEngine(flow_config)
+    
+    # Modify the resolved source to verify it doesn't affect the original destination
+    engine.hops_config[1]['source']['config']['nested']['key'] = 'modified'
+    engine.hops_config[1]['source']['config']['nested']['list'].append(4)
+    
+    # Verify original destination is unchanged
+    assert engine.hops_config[0]['destination']['config']['nested']['key'] == 'value'
+    assert engine.hops_config[0]['destination']['config']['nested']['list'] == [1, 2, 3]
+
+
