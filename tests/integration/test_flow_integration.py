@@ -61,18 +61,17 @@ def test_kafka_to_kafka_flow(kafka_container):
     
     # Create engine and run flow
     engine = MessageFlowEngine(flow_config)
-    message = Message(content='Test message for integration flow')
+    message = Message(key=None, value=b'Test message for integration flow')
     
-    results = engine.run_flow(message, count=1)
+    results = engine.execute(message, num_messages=1)
     
     # Verify results
-    assert len(results) == 1
-    result = results[0]
+    assert results.success
     
     # Check that all hops executed successfully
-    for hop_result in result.hop_results:
-        assert hop_result.status == 'success'
-        assert hop_result.validation_result.is_valid
+    for hop_result in results.hops:
+        assert hop_result.success
+        assert hop_result.validation.passed
 
 
 def test_rabbitmq_flow(rabbitmq_container):
@@ -138,15 +137,15 @@ def test_rabbitmq_flow(rabbitmq_container):
     }
     
     engine = MessageFlowEngine(flow_config)
-    message = Message(content='RabbitMQ flow test message')
+    message = Message(key=None, value=b'RabbitMQ flow test message')
     
-    results = engine.run_flow(message, count=1)
+    results = engine.execute(message, num_messages=1)
     
     # Verify results
-    assert len(results) == 1
-    for hop_result in results[0].hop_results:
-        assert hop_result.status == 'success'
-        assert hop_result.validation_result.is_valid
+    assert results.success
+    for hop_result in results.hops:
+        assert hop_result.success
+        assert hop_result.validation.passed
 
 
 def test_pulsar_flow_with_reader(pulsar_container):
@@ -196,15 +195,15 @@ def test_pulsar_flow_with_reader(pulsar_container):
     }
     
     engine = MessageFlowEngine(flow_config)
-    message = Message(content='Pulsar flow with reader test')
+    message = Message(key=None, value=b'Pulsar flow with reader test')
     
-    results = engine.run_flow(message, count=1)
+    results = engine.execute(message, num_messages=1)
     
     # Verify results
-    assert len(results) == 1
-    for hop_result in results[0].hop_results:
-        assert hop_result.status == 'success'
-        assert hop_result.validation_result.is_valid
+    assert results.success
+    for hop_result in results.hops:
+        assert hop_result.success
+        assert hop_result.validation.passed
 
 
 def test_multi_system_flow(kafka_container, pulsar_container):
@@ -257,15 +256,15 @@ def test_multi_system_flow(kafka_container, pulsar_container):
     }
     
     engine = MessageFlowEngine(flow_config)
-    message = Message(content='Test multi-system flow message')
+    message = Message(key=None, value=b'Test multi-system flow message')
     
-    results = engine.run_flow(message, count=1)
+    results = engine.execute(message, num_messages=1)
     
     # Verify results
-    assert len(results) == 1
-    for hop_result in results[0].hop_results:
-        assert hop_result.status == 'success'
-        assert hop_result.validation_result.is_valid
+    assert results.success
+    for hop_result in results.hops:
+        assert hop_result.success
+        assert hop_result.validation.passed
 
 
 def test_flow_with_yaml_config(kafka_container, tmp_path):
@@ -302,10 +301,10 @@ def test_flow_with_yaml_config(kafka_container, tmp_path):
         loaded_config = yaml.safe_load(f)
     
     engine = MessageFlowEngine(loaded_config)
-    message = Message(content='YAML config test')
+    message = Message(key=None, value=b'YAML config test')
     
-    results = engine.run_flow(message, count=1)
+    results = engine.execute(message, num_messages=1)
     
     # Verify
-    assert len(results) == 1
-    assert results[0].hop_results[0].status == 'success'
+    assert results.success
+    assert results.hops[0].success

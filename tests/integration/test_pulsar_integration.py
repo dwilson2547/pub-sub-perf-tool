@@ -28,7 +28,8 @@ def test_pulsar_publish_and_consume(pulsar_container):
         
         # Create a test message
         message = Message(
-            content="Hello Pulsar from testcontainers!",
+            key=None,
+            value=b"Hello Pulsar from testcontainers!",
             headers={"source": "integration-test"}
         )
         
@@ -46,7 +47,7 @@ def test_pulsar_publish_and_consume(pulsar_container):
         
         # Verify message
         assert consumed_message is not None
-        assert consumed_message.content == "Hello Pulsar from testcontainers!"
+        assert consumed_message.value == b"Hello Pulsar from testcontainers!"
         assert consumed_message.headers["source"] == "integration-test"
         
     finally:
@@ -72,7 +73,7 @@ def test_pulsar_reader_mode(pulsar_container):
     try:
         producer_client.connect()
         
-        message = Message(content="Message for reader")
+        message = Message(key=None, value=b"Message for reader")
         producer_client.publish(topic, message)
         
         time.sleep(2)
@@ -97,7 +98,7 @@ def test_pulsar_reader_mode(pulsar_container):
         consumed = reader_client.consume(timeout=10)
         
         assert consumed is not None
-        assert consumed.content == "Message for reader"
+        assert consumed.value == b"Message for reader"
         
     finally:
         reader_client.disconnect()
@@ -125,7 +126,8 @@ def test_pulsar_multiple_messages(pulsar_container):
         num_messages = 5
         for i in range(num_messages):
             message = Message(
-                content=f"Pulsar Message {i}",
+                key=None,
+                value=f"Pulsar Message {i}".encode('utf-8'),
                 headers={"index": str(i)}
             )
             client.publish(topic, message)
@@ -143,7 +145,7 @@ def test_pulsar_multiple_messages(pulsar_container):
         # Verify
         assert len(messages) == num_messages
         for i, msg in enumerate(messages):
-            assert f"Pulsar Message {i}" in msg.content
+            assert f"Pulsar Message {i}".encode('utf-8') == msg.value
             
     finally:
         client.disconnect()
@@ -168,7 +170,7 @@ def test_pulsar_persistent_topic(pulsar_container):
         client.subscribe(topic)
         
         # Publish message
-        message = Message(content="Persistent message")
+        message = Message(key=None, value=b"Persistent message")
         client.publish(topic, message)
         
         time.sleep(2)
@@ -176,7 +178,7 @@ def test_pulsar_persistent_topic(pulsar_container):
         # Consume and verify
         consumed = client.consume(timeout=10)
         assert consumed is not None
-        assert consumed.content == "Persistent message"
+        assert consumed.value == b"Persistent message"
         
     finally:
         client.disconnect()

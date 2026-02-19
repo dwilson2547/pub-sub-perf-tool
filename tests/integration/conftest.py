@@ -2,8 +2,7 @@
 import pytest
 from testcontainers.kafka import KafkaContainer
 from testcontainers.rabbitmq import RabbitMqContainer
-from testcontainers.core.generic import GenericContainer
-from testcontainers.core.waiting_strategies import Wait
+from testcontainers.core.container import DockerContainer
 
 
 @pytest.fixture(scope="module")
@@ -28,12 +27,16 @@ def rabbitmq_container():
 def pulsar_container():
     """Start a Pulsar container for testing."""
     container = (
-        GenericContainer("apachepulsar/pulsar:3.2.0")
+        DockerContainer("apachepulsar/pulsar:3.2.0")
         .with_command("bin/pulsar standalone")
         .with_exposed_ports(6650, 8080)
         .with_env("PULSAR_STANDALONE_USE_ZOOKEEPER", "false")
-        .waiting_for(Wait.for_log_message(".*messaging service is ready.*", timeout=60))
     )
     container.start()
+    
+    # Wait a bit for Pulsar to be ready
+    import time
+    time.sleep(15)
+    
     yield container
     container.stop()

@@ -26,7 +26,8 @@ def test_kafka_publish_and_consume(kafka_container):
         
         # Create a test message
         message = Message(
-            content="Hello Kafka from testcontainers!",
+            key=None,
+            value=b"Hello Kafka from testcontainers!",
             headers={"source": "integration-test"}
         )
         
@@ -44,7 +45,7 @@ def test_kafka_publish_and_consume(kafka_container):
         
         # Verify message
         assert consumed_message is not None
-        assert consumed_message.content == "Hello Kafka from testcontainers!"
+        assert consumed_message.value == b"Hello Kafka from testcontainers!"
         assert consumed_message.headers["source"] == "integration-test"
         
     finally:
@@ -73,7 +74,8 @@ def test_kafka_multiple_messages(kafka_container):
         num_messages = 5
         for i in range(num_messages):
             message = Message(
-                content=f"Message {i}",
+                key=None,
+                value=f"Message {i}".encode('utf-8'),
                 headers={"index": str(i)}
             )
             client.publish(topic, message)
@@ -91,7 +93,7 @@ def test_kafka_multiple_messages(kafka_container):
         # Verify
         assert len(messages) == num_messages
         for i, msg in enumerate(messages):
-            assert f"Message {i}" in msg.content
+            assert f"Message {i}".encode('utf-8') == msg.value
             
     finally:
         client.disconnect()
@@ -115,8 +117,8 @@ def test_kafka_message_key(kafka_container):
         
         # Publish with key
         message = Message(
-            content="Message with key",
-            key="test-key-123"
+            key="test-key-123",
+            value=b"Message with key"
         )
         client.publish(topic, message)
         
@@ -125,7 +127,7 @@ def test_kafka_message_key(kafka_container):
         # Consume and verify
         consumed = client.consume(timeout=10)
         assert consumed is not None
-        assert consumed.content == "Message with key"
+        assert consumed.value == b"Message with key"
         assert consumed.key == "test-key-123"
         
     finally:

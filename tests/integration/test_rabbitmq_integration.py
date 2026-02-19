@@ -31,7 +31,8 @@ def test_rabbitmq_publish_and_consume(rabbitmq_container):
         
         # Create a test message
         message = Message(
-            content="Hello RabbitMQ from testcontainers!",
+            key=None,
+            value=b"Hello RabbitMQ from testcontainers!",
             headers={"source": "integration-test"}
         )
         
@@ -49,7 +50,7 @@ def test_rabbitmq_publish_and_consume(rabbitmq_container):
         
         # Verify message
         assert consumed_message is not None
-        assert consumed_message.content == "Hello RabbitMQ from testcontainers!"
+        assert consumed_message.value == b"Hello RabbitMQ from testcontainers!"
         assert consumed_message.headers["source"] == "integration-test"
         
     finally:
@@ -83,7 +84,8 @@ def test_rabbitmq_multiple_messages(rabbitmq_container):
         num_messages = 5
         for i in range(num_messages):
             message = Message(
-                content=f"RabbitMQ Message {i}",
+                key=None,
+                value=f"RabbitMQ Message {i}".encode('utf-8'),
                 headers={"index": str(i)}
             )
             client.publish(topic, message)
@@ -101,7 +103,7 @@ def test_rabbitmq_multiple_messages(rabbitmq_container):
         # Verify
         assert len(messages) == num_messages
         for i, msg in enumerate(messages):
-            assert f"RabbitMQ Message {i}" in msg.content
+            assert f"RabbitMQ Message {i}".encode('utf-8') == msg.value
             
     finally:
         client.disconnect()
@@ -130,7 +132,7 @@ def test_rabbitmq_routing(rabbitmq_container):
         client.subscribe("test.routing.*")
         
         # Publish to matching routing key
-        message = Message(content="Routed message")
+        message = Message(key=None, value=b"Routed message")
         client.publish("test.routing.key1", message)
         
         time.sleep(2)
@@ -138,7 +140,7 @@ def test_rabbitmq_routing(rabbitmq_container):
         # Should receive the message
         consumed = client.consume(timeout=10)
         assert consumed is not None
-        assert consumed.content == "Routed message"
+        assert consumed.value == b"Routed message"
         
     finally:
         client.disconnect()
