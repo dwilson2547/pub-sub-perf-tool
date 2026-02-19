@@ -4,10 +4,48 @@ This directory contains integration tests that use [Testcontainers](https://test
 
 ## Overview
 
-The integration tests provide:
-- **Real message broker testing**: Tests run against actual Kafka, RabbitMQ, and Pulsar instances
-- **End-to-end validation**: Complete message flow tests across different systems
-- **Example flows**: Demonstrations of how to use the tool in real scenarios
+The integration tests **validate the core capabilities** of this performance testing tool:
+
+### What These Tests Actually Validate
+
+Unlike simple smoke tests, these integration tests comprehensively validate:
+
+1. **Performance Metrics** (`test_performance_metrics.py`)
+   - Latency tracking (publish, consume, end-to-end)
+   - Throughput measurement (messages per second)
+   - Message ordering guarantees
+   - Concurrent consumer behavior
+   - Performance baseline establishment
+
+2. **Validation Framework** (`test_validation_features.py`)
+   - `exists` - Message presence validation
+   - `contains` - Content matching validation
+   - `json_schema` - Structured data validation with required fields
+   - `size` - Message size constraints (min/max bytes)
+   - Multi-hop validation chains
+   - Validation failure detection and reporting
+
+3. **Real-World Scenarios** (`test_real_world_scenarios.py`)
+   - Microservices event propagation (order → payment → inventory)
+   - Data pipeline transformations (Kafka → RabbitMQ)
+   - Notification fanout patterns (topic-based routing)
+   - Log aggregation pipelines (app logs → centralized storage)
+   - Data quality issue detection (missing required fields)
+   - Performance baseline measurements
+
+4. **Client Functionality** (`test_*_integration.py`)
+   - Connection lifecycle (connect, disconnect, reconnect)
+   - Message publishing with headers and keys
+   - Message consumption with timeouts
+   - Multi-message batching
+   - Protocol-specific features (Kafka partitioning, RabbitMQ routing, Pulsar readers)
+
+5. **Flow Engine** (`test_flow_integration.py`)
+   - Multi-hop message flows
+   - Cross-protocol integration (Kafka → Pulsar, etc.)
+   - YAML configuration loading
+   - Hop-by-hop validation
+   - Error propagation
 
 ## Supported Testcontainers
 
@@ -42,14 +80,19 @@ pytest tests/integration/ -v
 ### Run Specific Test Files
 
 ```bash
-# Kafka integration tests
+# Basic client integration tests
 pytest tests/integration/test_kafka_integration.py -v
-
-# RabbitMQ integration tests
 pytest tests/integration/test_rabbitmq_integration.py -v
-
-# Pulsar integration tests
 pytest tests/integration/test_pulsar_integration.py -v
+
+# Performance validation tests
+pytest tests/integration/test_performance_metrics.py -v
+
+# Validation framework tests
+pytest tests/integration/test_validation_features.py -v
+
+# Real-world scenario tests
+pytest tests/integration/test_real_world_scenarios.py -v
 
 # Flow integration tests (multi-system)
 pytest tests/integration/test_flow_integration.py -v
@@ -62,24 +105,54 @@ pytest tests/integration/test_flow_integration.py -v
 pytest tests/integration/test_kafka_integration.py::test_kafka_publish_and_consume -v
 
 # Run tests matching a pattern
-pytest tests/integration/ -k "kafka" -v
+pytest tests/integration/ -k "validation" -v
+pytest tests/integration/ -k "performance" -v
 ```
 
 ## Test Structure
 
-### Individual Client Tests
+### Basic Client Tests
 
-- `test_kafka_integration.py`: Tests Kafka client with real Kafka container
-  - Basic publish/consume
-  - Multiple messages
-  - Message keys
+- `test_kafka_integration.py`: Kafka client basics
+  - Connection lifecycle
+  - Message publish/consume
+  - Message keys and headers
   
-- `test_rabbitmq_integration.py`: Tests RabbitMQ client with real RabbitMQ container
-  - Basic publish/consume
-  - Multiple messages
-  - Topic routing
+- `test_rabbitmq_integration.py`: RabbitMQ client basics
+  - Exchange and queue management
+  - Topic-based routing
+  - Message persistence
   
-- `test_pulsar_integration.py`: Tests Pulsar client with real Pulsar container
+- `test_pulsar_integration.py`: Pulsar client basics
+  - Consumer and reader modes
+  - Persistent topics
+  - Message batching
+
+### Performance Tests
+
+- `test_performance_metrics.py`: **Performance validation**
+  - Latency tracking and thresholds
+  - Throughput measurement
+  - Message ordering verification
+  - Concurrent consumer load balancing
+  - Performance baseline establishment
+
+### Validation Tests
+
+- `test_validation_features.py`: **Validation framework**
+  - All validation types (exists, contains, json_schema, size)
+  - Validation success and failure scenarios
+  - Multi-hop validation chains
+  - Data quality enforcement
+
+### Real-World Scenario Tests
+
+- `test_real_world_scenarios.py`: **Production use cases**
+  - Microservices event propagation
+  - Data pipeline transformations
+  - Notification fanout patterns
+  - Log aggregation flows
+  - Error detection and handling
   - Basic publish/consume
   - Reader mode
   - Multiple messages
