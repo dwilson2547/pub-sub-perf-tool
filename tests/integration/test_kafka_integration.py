@@ -41,7 +41,8 @@ def test_kafka_publish_and_consume(kafka_container):
         time.sleep(2)
         
         # Consume message
-        consumed_message = client.consume(timeout=10)
+        consume_result = client.consume(topic, timeout_ms=10000)
+        consumed_message = consume_result.message
         
         # Verify message
         assert consumed_message is not None
@@ -86,9 +87,9 @@ def test_kafka_multiple_messages(kafka_container):
         # Consume all messages
         messages = []
         for _ in range(num_messages):
-            msg = client.consume(timeout=10)
-            if msg:
-                messages.append(msg)
+            result = client.consume(topic, timeout_ms=10000)
+            if result.message:
+                messages.append(result.message)
         
         # Verify
         assert len(messages) == num_messages
@@ -125,7 +126,8 @@ def test_kafka_message_key(kafka_container):
         time.sleep(2)
         
         # Consume and verify
-        consumed = client.consume(timeout=10)
+        result = client.consume(topic, timeout_ms=10000)
+        consumed = result.message
         assert consumed is not None
         assert consumed.value == b"Message with key"
         assert consumed.key == "test-key-123"

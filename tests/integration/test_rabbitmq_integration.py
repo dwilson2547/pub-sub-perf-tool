@@ -46,7 +46,8 @@ def test_rabbitmq_publish_and_consume(rabbitmq_container):
         time.sleep(2)
         
         # Consume message
-        consumed_message = client.consume(timeout=10)
+        consume_result = client.consume(topic, timeout_ms=10000)
+        consumed_message = consume_result.message
         
         # Verify message
         assert consumed_message is not None
@@ -96,9 +97,9 @@ def test_rabbitmq_multiple_messages(rabbitmq_container):
         # Consume all messages
         messages = []
         for _ in range(num_messages):
-            msg = client.consume(timeout=10)
-            if msg:
-                messages.append(msg)
+            result = client.consume(topic, timeout_ms=10000)
+            if result.message:
+                messages.append(result.message)
         
         # Verify
         assert len(messages) == num_messages
@@ -138,7 +139,8 @@ def test_rabbitmq_routing(rabbitmq_container):
         time.sleep(2)
         
         # Should receive the message
-        consumed = client.consume(timeout=10)
+        result = client.consume("test.routing.*", timeout_ms=10000)
+        consumed = result.message
         assert consumed is not None
         assert consumed.value == b"Routed message"
         

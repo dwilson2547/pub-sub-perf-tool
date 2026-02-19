@@ -43,7 +43,8 @@ def test_pulsar_publish_and_consume(pulsar_container):
         time.sleep(2)
         
         # Consume message
-        consumed_message = client.consume(timeout=10)
+        consume_result = client.consume(topic, timeout_ms=10000)
+        consumed_message = consume_result.message
         
         # Verify message
         assert consumed_message is not None
@@ -95,7 +96,8 @@ def test_pulsar_reader_mode(pulsar_container):
         reader_client.subscribe(topic)
         
         # Read the message
-        consumed = reader_client.consume(timeout=10)
+        result = reader_client.consume(topic, timeout_ms=10000)
+        consumed = result.message
         
         assert consumed is not None
         assert consumed.value == b"Message for reader"
@@ -138,9 +140,9 @@ def test_pulsar_multiple_messages(pulsar_container):
         # Consume all messages
         messages = []
         for _ in range(num_messages):
-            msg = client.consume(timeout=10)
-            if msg:
-                messages.append(msg)
+            result = client.consume(topic, timeout_ms=10000)
+            if result.message:
+                messages.append(result.message)
         
         # Verify
         assert len(messages) == num_messages
@@ -176,7 +178,8 @@ def test_pulsar_persistent_topic(pulsar_container):
         time.sleep(2)
         
         # Consume and verify
-        consumed = client.consume(timeout=10)
+        result = client.consume(topic, timeout_ms=10000)
+        consumed = result.message
         assert consumed is not None
         assert consumed.value == b"Persistent message"
         
