@@ -283,3 +283,42 @@ def test_hop_reference_deep_copy():
     assert engine.hops_config[0]['destination']['config']['nested']['list'] == [1, 2, 3]
 
 
+def test_hop_reference_forward_allowed():
+    """Test that forward references (to hops defined later) are allowed
+    
+    While messages flow forward through hops, the reference resolution happens
+    at initialization time, so references can point to any named hop regardless
+    of order in the configuration.
+    """
+    flow_config = {
+        'name': 'test-flow',
+        'hops': [
+            {
+                'name': 'first-hop',
+                'source': 'hop: second-hop',  # Forward reference to a hop defined later
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            },
+            {
+                'name': 'second-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'output-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            }
+        ]
+    }
+    
+    # Forward references are allowed and should resolve correctly
+    engine = MessageFlowEngine(flow_config)
+    
+    # Verify the reference was resolved
+    assert engine.hops_config[0]['source']['type'] == 'kafka'
+    assert engine.hops_config[0]['source']['topic'] == 'output-topic'
+
+
+
