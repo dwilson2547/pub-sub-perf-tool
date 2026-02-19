@@ -215,19 +215,33 @@ class MessageFlowEngine:
                         hop_config['source'] = copy.deepcopy(hop_destinations[referenced_hop])
                     else:
                         raise ValueError(f"Cannot resolve hop reference: '{referenced_hop}' not found")
+                elif source.startswith('timeline:'):
+                    # Timeline file reference – kept as-is; handled at execution time
+                    pass
                 else:
-                    raise ValueError(f"Invalid source reference format: '{source}'. Expected 'hop: hop-name'")
+                    raise ValueError(f"Invalid source reference format: '{source}'. Expected 'hop: hop-name' or 'timeline: /path/to/file.json'")
     
-    def execute(self, initial_message: Message, num_messages: int = 1) -> FlowResult:
+    def execute(self, initial_message: Optional[Message] = None, num_messages: int = 1) -> FlowResult:
         """Execute the message flow
         
         Args:
-            initial_message: Initial message to send
-            num_messages: Number of messages to process
+            initial_message: Initial message to send (ignored when using a timeline source)
+            num_messages: Number of messages to process (ignored when using a timeline source)
             
         Returns:
             FlowResult with execution details
         """
+        # Check if the first hop uses a timeline source
+        first_hop_source = self.hops_config[0].get('source') if self.hops_config else None
+        if isinstance(first_hop_source, str) and first_hop_source.startswith('timeline:'):
+            timeline_path = first_hop_source[len('timeline:'):].strip()
+            from .timeline.timeline import Timeline  # local import to avoid circular dependency
+            timeline = Timeline.load(timeline_path)
+            return self._execute_with_timeline(timeline)
+
+        if initial_message is None:
+            raise ValueError("initial_message is required when not using a timeline source")
+
         start_time = time.time()
         flow_result = FlowResult(flow_name=self.flow_name, success=True)
         
@@ -259,6 +273,66 @@ class MessageFlowEngine:
                 error=str(e)
             ))
         
+        flow_result.total_time_ms = (time.time() - start_time) * 1000
+        return flow_result
+
+    def _execute_with_timeline(self, timeline) -> FlowResult:
+        """Execute the message flow by replaying messages from a timeline.
+
+        Messages are published at the same relative rate at which they were
+        originally captured (inter-message gaps are preserved).
+
+        Args:
+            timeline: Timeline whose entries will be replayed.
+
+        Returns:
+            FlowResult with execution details.
+        """
+        start_time = time.time()
+        flow_result = FlowResult(flow_name=self.flow_name, success=True)
+
+        prev_offset_ms = 0.0
+
+        try:
+            for entry in timeline.entries:
+                # Sleep to maintain the original inter-message timing
+                gap_ms = entry.offset_ms - prev_offset_ms
+                if gap_ms > 0:
+                    time.sleep(gap_ms / 1000.0)
+                prev_offset_ms = entry.offset_ms
+
+                current_message = Message(
+                    key=entry.key,
+                    value=entry.value,
+                    headers=entry.headers,
+                )
+
+                for hop_idx, hop_config in enumerate(self.hops_config):
+                    if hop_idx == 0:
+                        # Strip the timeline source so _execute_hop treats this
+                        # as a first hop (publish-only, no source to consume from)
+                        hop_cfg = {k: v for k, v in hop_config.items() if k != 'source'}
+                    else:
+                        hop_cfg = hop_config
+
+                    hop_result = self._execute_hop(hop_idx, hop_cfg, current_message)
+                    flow_result.hops.append(hop_result)
+
+                    if not hop_result.success:
+                        flow_result.success = False
+                        break
+
+                flow_result.messages_processed += 1
+
+        except Exception as e:
+            flow_result.success = False
+            flow_result.hops.append(HopResult(
+                hop_index=-1,
+                hop_name="error",
+                success=False,
+                error=str(e)
+            ))
+
         flow_result.total_time_ms = (time.time() - start_time) * 1000
         return flow_result
     
