@@ -35,13 +35,27 @@ def timeline_main():
               help='Maximum number of messages to capture')
 @click.option('--timeout-ms', default=5000, type=int, show_default=True,
               help='Per-poll timeout in milliseconds; capture stops on first timeout')
-def capture(output_file, source_type, topic, config_file, max_messages, timeout_ms):
+@click.option('--workers', '-w', default=1, type=int, show_default=True,
+              help='Number of concurrent consumer threads (enables compressed output)')
+@click.option('--chunk-size', default=100_000, type=int, show_default=True,
+              help='Max entries per output file part; 0 = no splitting (workers mode only)')
+def capture(output_file, source_type, topic, config_file, max_messages, timeout_ms,
+            workers, chunk_size):
     """Capture messages from a pub-sub topic into OUTPUT_FILE.
 
     The timeline file can later be used as the source for a pub-sub-perf
     flow to replay the captured messages at the original rate.
 
-    Example:
+    When --workers is greater than 1 (or --chunk-size is set), the capture
+    tool runs multiple concurrent consumer threads and writes compressed
+    msgpack+zstd part files named <OUTPUT_FILE>_w<N>_p<N>.timeline.  Each
+    worker writes its own files independently for maximum throughput.
+
+    For Kafka, multiple workers share the same consumer group so partitions
+    are distributed automatically.  For Pulsar/StreamNative, a Shared
+    subscription with a random name is used.
+
+    Example (single-threaded JSON):
 
     \b
         pub-sub-timeline capture capture.json \\
@@ -49,6 +63,16 @@ def capture(output_file, source_type, topic, config_file, max_messages, timeout_
             --topic my-topic \\
             --config-file kafka-config.yaml \\
             --max-messages 500
+
+    Example (multi-threaded compressed):
+
+    \b
+        pub-sub-timeline capture capture \\
+            --source-type kafka \\
+            --topic my-topic \\
+            --config-file kafka-config.yaml \\
+            --workers 4 \\
+            --chunk-size 100000
     """
     config = {}
     if config_file:
@@ -59,30 +83,59 @@ def capture(output_file, source_type, topic, config_file, max_messages, timeout_
             else:
                 config = json.load(f)
 
-    capturer = TimelineCapture(source_type, topic, config)
+    use_compressed_format = workers > 1 or chunk_size > 0
 
-    def progress(count: int, total: int) -> None:
-        click.echo(f"\rCapturing: {count}/{total} messages", nl=False)
+    capturer = TimelineCapture(source_type, topic, config, num_workers=workers)
 
     click.echo(f"Connecting to {source_type}, topic '{topic}'...")
 
-    try:
-        timeline = capturer.capture(
-            max_messages=max_messages,
-            timeout_ms=timeout_ms,
-            on_message=progress,
+    if use_compressed_format:
+        click.echo(
+            f"Starting {workers} worker(s), chunk size {chunk_size or 'unlimited'}..."
         )
-    except Exception as exc:
-        click.echo(f"\nError during capture: {exc}", err=True)
-        sys.exit(1)
+        total_captured = 0
 
-    click.echo(f"\nCaptured {len(timeline.entries)} messages")
+        def progress(count: int) -> None:
+            nonlocal total_captured
+            total_captured = count
+            click.echo(f"\rCapturing: {count} messages", nl=False)
 
-    if not timeline.entries:
-        click.echo("Warning: no messages captured – timeline file will be empty", err=True)
+        try:
+            paths = capturer.capture_to_files(
+                output_base=output_file,
+                max_messages=max_messages,
+                timeout_ms=timeout_ms,
+                chunk_size=chunk_size,
+                on_progress=progress,
+            )
+        except Exception as exc:
+            click.echo(f"\nError during capture: {exc}", err=True)
+            sys.exit(1)
 
-    timeline.save(output_file)
-    click.echo(f"Timeline saved to {output_file}")
+        click.echo(f"\nCaptured {total_captured} messages across {len(paths)} file(s):")
+        for p in paths:
+            click.echo(f"  {p}")
+    else:
+        def progress(count: int, total: int) -> None:
+            click.echo(f"\rCapturing: {count}/{total} messages", nl=False)
+
+        try:
+            timeline = capturer.capture(
+                max_messages=max_messages,
+                timeout_ms=timeout_ms,
+                on_message=progress,
+            )
+        except Exception as exc:
+            click.echo(f"\nError during capture: {exc}", err=True)
+            sys.exit(1)
+
+        click.echo(f"\nCaptured {len(timeline.entries)} messages")
+
+        if not timeline.entries:
+            click.echo("Warning: no messages captured – timeline file will be empty", err=True)
+
+        timeline.save(output_file)
+        click.echo(f"Timeline saved to {output_file}")
 
 
 if __name__ == '__main__':
