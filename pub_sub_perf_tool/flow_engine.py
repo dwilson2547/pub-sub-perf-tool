@@ -282,75 +282,119 @@ class MessageFlowEngine:
             destination_config = hop_config.get('destination', {})
             validation_config = hop_config.get('validation', {})
             
-            # Create clients
-            source_type = ClientType(source_config.get('type'))
-            source_client = create_client(source_type, source_config.get('config', {}))
-            
+            # Create destination client (always needed)
             dest_type = ClientType(destination_config.get('type'))
             dest_client = create_client(dest_type, destination_config.get('config', {}))
             
+            # Create source client only if source is specified
+            source_client = None
+            if source_config and source_config.get('type'):
+                source_type = ClientType(source_config.get('type'))
+                source_client = create_client(source_type, source_config.get('config', {}))
+            
             # Execute hop
-            with source_client, dest_client:
-                # If this is not the first hop, consume from source
-                consume_latency = 0.0
-                if hop_index > 0:
-                    source_topic = source_config.get('topic')
-                    source_client.subscribe([source_topic])
+            if source_client:
+                with source_client, dest_client:
+                    # Consume from source if this is not the first hop
+                    consume_latency = 0.0
+                    if hop_index > 0:
+                        source_topic = source_config.get('topic')
+                        source_client.subscribe([source_topic])
+                        
+                        consume_result = source_client.consume(source_topic, timeout_ms=5000)
+                        consume_latency = consume_result.latency_ms
+                        
+                        if consume_result.message:
+                            message = consume_result.message
+                        else:
+                            return HopResult(
+                                hop_index=hop_index,
+                                hop_name=hop_name,
+                                success=False,
+                                consume_latency_ms=consume_latency,
+                                error="No message received from source"
+                            )
                     
-                    consume_result = source_client.consume(source_topic, timeout_ms=5000)
-                    consume_latency = consume_result.latency_ms
+                    # Validate message if validation is configured
+                    validation_result = None
+                    if validation_config:
+                        validation_result = self.validator.validate_message(message, validation_config)
+                        if not validation_result.passed:
+                            return HopResult(
+                                hop_index=hop_index,
+                                hop_name=hop_name,
+                                success=False,
+                                validation=validation_result,
+                                consume_latency_ms=consume_latency,
+                                error=f"Validation failed: {validation_result.message}"
+                            )
                     
-                    if consume_result.message:
-                        message = consume_result.message
-                    else:
-                        return HopResult(
-                            hop_index=hop_index,
-                            hop_name=hop_name,
-                            success=False,
-                            consume_latency_ms=consume_latency,
-                            error="No message received from source"
-                        )
-                
-                # Validate message if validation is configured
-                validation_result = None
-                if validation_config:
-                    validation_result = self.validator.validate_message(message, validation_config)
-                    if not validation_result.passed:
+                    # Publish to destination
+                    dest_topic = destination_config.get('topic')
+                    publish_result = dest_client.publish(dest_topic, message)
+                    
+                    if not publish_result.success:
                         return HopResult(
                             hop_index=hop_index,
                             hop_name=hop_name,
                             success=False,
                             validation=validation_result,
                             consume_latency_ms=consume_latency,
-                            error=f"Validation failed: {validation_result.message}"
+                            publish_latency_ms=publish_result.latency_ms,
+                            error=f"Publish failed: {publish_result.error}"
                         )
-                
-                # Publish to destination
-                dest_topic = destination_config.get('topic')
-                publish_result = dest_client.publish(dest_topic, message)
-                
-                if not publish_result.success:
+                    
+                    total_latency = (time.time() - hop_start) * 1000
+                    
                     return HopResult(
                         hop_index=hop_index,
                         hop_name=hop_name,
-                        success=False,
+                        success=True,
                         validation=validation_result,
                         consume_latency_ms=consume_latency,
                         publish_latency_ms=publish_result.latency_ms,
-                        error=f"Publish failed: {publish_result.error}"
+                        total_latency_ms=total_latency
                     )
-                
-                total_latency = (time.time() - hop_start) * 1000
-                
-                return HopResult(
-                    hop_index=hop_index,
-                    hop_name=hop_name,
-                    success=True,
-                    validation=validation_result,
-                    consume_latency_ms=consume_latency,
-                    publish_latency_ms=publish_result.latency_ms,
-                    total_latency_ms=total_latency
-                )
+            else:
+                # First hop - no source, just publish to destination
+                with dest_client:
+                    # Validate message if validation is configured
+                    validation_result = None
+                    if validation_config:
+                        validation_result = self.validator.validate_message(message, validation_config)
+                        if not validation_result.passed:
+                            return HopResult(
+                                hop_index=hop_index,
+                                hop_name=hop_name,
+                                success=False,
+                                validation=validation_result,
+                                error=f"Validation failed: {validation_result.message}"
+                            )
+                    
+                    # Publish to destination
+                    dest_topic = destination_config.get('topic')
+                    publish_result = dest_client.publish(dest_topic, message)
+                    
+                    if not publish_result.success:
+                        return HopResult(
+                            hop_index=hop_index,
+                            hop_name=hop_name,
+                            success=False,
+                            validation=validation_result,
+                            publish_latency_ms=publish_result.latency_ms,
+                            error=f"Publish failed: {publish_result.error}"
+                        )
+                    
+                    total_latency = (time.time() - hop_start) * 1000
+                    
+                    return HopResult(
+                        hop_index=hop_index,
+                        hop_name=hop_name,
+                        success=True,
+                        validation=validation_result,
+                        publish_latency_ms=publish_result.latency_ms,
+                        total_latency_ms=total_latency
+                    )
                 
         except Exception as e:
             total_latency = (time.time() - hop_start) * 1000
