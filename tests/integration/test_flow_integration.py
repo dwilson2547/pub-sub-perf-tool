@@ -35,13 +35,7 @@ def test_kafka_to_kafka_flow(kafka_container):
             },
             {
                 'name': 'kafka-to-kafka',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'flow-test-input',
-                    'config': {
-                        'bootstrap_servers': [bootstrap_servers]
-                    }
-                },
+                'source': 'hop: initial-publish',
                 'destination': {
                     'type': 'kafka',
                     'topic': 'flow-test-output',
@@ -102,17 +96,7 @@ def test_rabbitmq_flow(rabbitmq_container):
             },
             {
                 'name': 'rabbitmq-routing',
-                'source': {
-                    'type': 'rabbitmq',
-                    'topic': 'flow.test.input',
-                    'config': {
-                        'host': host,
-                        'port': int(port),
-                        'username': 'guest',
-                        'password': 'guest',
-                        'exchange': 'flow-test-exchange'
-                    }
-                },
+                'source': 'hop: publish-to-rabbitmq',
                 'destination': {
                     'type': 'rabbitmq',
                     'topic': 'flow.test.output',
@@ -231,13 +215,7 @@ def test_multi_system_flow(kafka_container, pulsar_container):
             },
             {
                 'name': 'kafka-to-pulsar',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'multi-system-input',
-                    'config': {
-                        'bootstrap_servers': [kafka_bootstrap]
-                    }
-                },
+                'source': 'hop: kafka-publish',
                 'destination': {
                     'type': 'pulsar',
                     'topic': 'persistent://public/default/multi-output',

@@ -317,13 +317,7 @@ def test_multi_hop_validation_chain(kafka_container, pulsar_container):
             },
             {
                 'name': 'kafka-to-pulsar-with-contains-validation',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'validation-chain-kafka',
-                    'config': {
-                        'bootstrap_servers': [kafka_bootstrap]
-                    }
-                },
+                'source': 'hop: kafka-hop-with-json-validation',
                 'destination': {
                     'type': 'pulsar',
                     'topic': 'persistent://public/default/validation-chain-output',

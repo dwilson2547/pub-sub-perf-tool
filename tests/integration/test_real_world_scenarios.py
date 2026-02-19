@@ -39,13 +39,7 @@ def test_microservices_event_propagation(kafka_container):
             },
             {
                 'name': 'payment-processing',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'orders.placed',
-                    'config': {
-                        'bootstrap_servers': [bootstrap_servers]
-                    }
-                },
+                'source': 'hop: order-placed',
                 'destination': {
                     'type': 'kafka',
                     'topic': 'payments.processed',
@@ -62,13 +56,7 @@ def test_microservices_event_propagation(kafka_container):
             },
             {
                 'name': 'inventory-update',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'payments.processed',
-                    'config': {
-                        'bootstrap_servers': [bootstrap_servers]
-                    }
-                },
+                'source': 'hop: payment-processing',
                 'destination': {
                     'type': 'kafka',
                     'topic': 'inventory.updated',
@@ -159,13 +147,7 @@ def test_data_pipeline_transformation(kafka_container, rabbitmq_container):
             },
             {
                 'name': 'data-routing',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'raw.data.input',
-                    'config': {
-                        'bootstrap_servers': [kafka_bootstrap]
-                    }
-                },
+                'source': 'hop: raw-data-ingestion',
                 'destination': {
                     'type': 'rabbitmq',
                     'topic': 'processed.data.output',
@@ -326,13 +308,7 @@ def test_log_aggregation_pipeline(kafka_container, pulsar_container):
             },
             {
                 'name': 'centralized-logging',
-                'source': {
-                    'type': 'kafka',
-                    'topic': 'app.logs',
-                    'config': {
-                        'bootstrap_servers': [kafka_bootstrap]
-                    }
-                },
+                'source': 'hop: application-logs',
                 'destination': {
                     'type': 'pulsar',
                     'topic': 'persistent://public/default/logs-archive',
