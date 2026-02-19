@@ -37,7 +37,7 @@ def test_rabbitmq_publish_and_consume(rabbitmq_container):
         )
         
         # Subscribe to topic
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish message
         client.publish(topic, message)
@@ -79,7 +79,7 @@ def test_rabbitmq_multiple_messages(rabbitmq_container):
     
     try:
         client.connect()
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish multiple messages
         num_messages = 5
@@ -130,7 +130,7 @@ def test_rabbitmq_routing(rabbitmq_container):
         client.connect()
         
         # Subscribe to a pattern
-        client.subscribe("test.routing.*")
+        client.subscribe(["test.routing.*"])
         
         # Publish to matching routing key
         message = Message(key=None, value=b"Routed message")

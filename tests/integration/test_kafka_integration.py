@@ -32,7 +32,7 @@ def test_kafka_publish_and_consume(kafka_container):
         )
         
         # Subscribe to topic
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish message
         client.publish(topic, message)
@@ -69,7 +69,7 @@ def test_kafka_multiple_messages(kafka_container):
     
     try:
         client.connect()
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish multiple messages
         num_messages = 5
@@ -114,7 +114,7 @@ def test_kafka_message_key(kafka_container):
     
     try:
         client.connect()
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish with key
         message = Message(

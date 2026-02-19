@@ -34,7 +34,7 @@ def test_pulsar_publish_and_consume(pulsar_container):
         )
         
         # Subscribe to topic
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish message
         client.publish(topic, message)
@@ -93,7 +93,7 @@ def test_pulsar_reader_mode(pulsar_container):
     
     try:
         reader_client.connect()
-        reader_client.subscribe(topic)
+        reader_client.subscribe([topic])
         
         # Read the message
         result = reader_client.consume(topic, timeout_ms=10000)
@@ -122,7 +122,7 @@ def test_pulsar_multiple_messages(pulsar_container):
     
     try:
         client.connect()
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish multiple messages
         num_messages = 5
@@ -169,7 +169,7 @@ def test_pulsar_persistent_topic(pulsar_container):
     
     try:
         client.connect()
-        client.subscribe(topic)
+        client.subscribe([topic])
         
         # Publish message
         message = Message(key=None, value=b"Persistent message")
