@@ -78,7 +78,7 @@ def run(config_file, message, message_file, key, count, output):
 
 @main.command()
 @click.argument('output_file', type=click.Path())
-@click.option('--type', '-t', type=click.Choice(['kafka', 'pulsar', 'rabbitmq', 'iggy']), 
+@click.option('--type', '-t', type=click.Choice(['kafka', 'pulsar', 'rabbitmq', 'iggy', 'eventhubs', 'googlepubsub', 'streamnative']), 
               multiple=True, default=['kafka'], help='Client types to include')
 def generate_config(output_file, type):
     """Generate a sample configuration file
@@ -280,6 +280,59 @@ def _create_sample_config(client_types):
                 'type': 'exists'
             }
         })
+    elif first_type == 'eventhubs':
+        config['hops'].append({
+            'name': 'initial-publish',
+            'destination': {
+                'type': 'eventhubs',
+                'topic': 'test-eventhub',
+                'config': {
+                    'connection_string': 'Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=<key-name>;SharedAccessKey=<key>',
+                    'eventhub_name': 'test-eventhub',
+                    'consumer_group': '$Default'
+                }
+            },
+            'validation': {
+                'type': 'exists'
+            }
+        })
+    elif first_type == 'googlepubsub':
+        config['hops'].append({
+            'name': 'initial-publish',
+            'destination': {
+                'type': 'googlepubsub',
+                'topic': 'test-topic',
+                'config': {
+                    'project_id': 'your-project-id',
+                    'credentials_path': '/path/to/service-account.json'
+                }
+            },
+            'validation': {
+                'type': 'exists'
+            }
+        })
+    elif first_type == 'streamnative':
+        config['hops'].append({
+            'name': 'initial-publish',
+            'destination': {
+                'type': 'streamnative',
+                'topic': 'persistent://public/default/test-topic',
+                'config': {
+                    'service_url': 'pulsar+ssl://streamnative.cloud:6651',
+                    'auth_params': {
+                        'type': 'oauth2',
+                        'issuer_url': 'https://auth.streamnative.cloud',
+                        'client_id': 'your-client-id',
+                        'client_secret': 'your-client-secret',
+                        'audience': 'urn:sn:pulsar:your-org:your-instance'
+                    },
+                    'use_reader': False
+                }
+            },
+            'validation': {
+                'type': 'exists'
+            }
+        })
     
     # Add intermediary hop if multiple types
     if len(client_types) > 1:
@@ -314,6 +367,29 @@ def _create_sample_config(client_types):
                 'service_url': 'pulsar://localhost:6650',
                 'use_reader': True  # Use reader for intermediary hops
             }
+        elif first_type == 'eventhubs':
+            hop_config['source']['config'] = {
+                'connection_string': 'Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=<key-name>;SharedAccessKey=<key>',
+                'eventhub_name': 'test-eventhub',
+                'consumer_group': '$Default'
+            }
+        elif first_type == 'googlepubsub':
+            hop_config['source']['config'] = {
+                'project_id': 'your-project-id',
+                'credentials_path': '/path/to/service-account.json'
+            }
+        elif first_type == 'streamnative':
+            hop_config['source']['config'] = {
+                'service_url': 'pulsar+ssl://streamnative.cloud:6651',
+                'auth_params': {
+                    'type': 'oauth2',
+                    'issuer_url': 'https://auth.streamnative.cloud',
+                    'client_id': 'your-client-id',
+                    'client_secret': 'your-client-secret',
+                    'audience': 'urn:sn:pulsar:your-org:your-instance'
+                },
+                'use_reader': True
+            }
         
         if second_type == 'kafka':
             hop_config['destination']['config'] = {'bootstrap_servers': ['localhost:9092']}
@@ -323,6 +399,28 @@ def _create_sample_config(client_types):
             hop_config['destination']['config'] = {'host': 'localhost', 'port': 5672}
         elif second_type == 'iggy':
             hop_config['destination']['config'] = {'host': 'localhost', 'port': 8090}
+        elif second_type == 'eventhubs':
+            hop_config['destination']['config'] = {
+                'connection_string': 'Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=<key-name>;SharedAccessKey=<key>',
+                'eventhub_name': 'test-eventhub-2',
+                'consumer_group': '$Default'
+            }
+        elif second_type == 'googlepubsub':
+            hop_config['destination']['config'] = {
+                'project_id': 'your-project-id',
+                'credentials_path': '/path/to/service-account.json'
+            }
+        elif second_type == 'streamnative':
+            hop_config['destination']['config'] = {
+                'service_url': 'pulsar+ssl://streamnative.cloud:6651',
+                'auth_params': {
+                    'type': 'oauth2',
+                    'issuer_url': 'https://auth.streamnative.cloud',
+                    'client_id': 'your-client-id',
+                    'client_secret': 'your-client-secret',
+                    'audience': 'urn:sn:pulsar:your-org:your-instance'
+                }
+            }
         
         config['hops'].append(hop_config)
     

@@ -6,7 +6,15 @@ import json
 from enum import Enum
 
 from .base import PubSubClient, Message
-from .clients import KafkaClient, PulsarClient, RabbitMQClient, IggyClient
+from .clients import (
+    KafkaClient,
+    PulsarClient,
+    RabbitMQClient,
+    IggyClient,
+    EventHubsClient,
+    GooglePubSubClient,
+    StreamNativeClient
+)
 
 
 class ClientType(Enum):
@@ -15,6 +23,9 @@ class ClientType(Enum):
     PULSAR = "pulsar"
     RABBITMQ = "rabbitmq"
     IGGY = "iggy"
+    EVENTHUBS = "eventhubs"
+    GOOGLEPUBSUB = "googlepubsub"
+    STREAMNATIVE = "streamnative"
 
 
 @dataclass
@@ -141,6 +152,9 @@ def create_client(client_type: ClientType, config: Dict[str, Any]) -> PubSubClie
         ClientType.PULSAR: PulsarClient,
         ClientType.RABBITMQ: RabbitMQClient,
         ClientType.IGGY: IggyClient,
+        ClientType.EVENTHUBS: EventHubsClient,
+        ClientType.GOOGLEPUBSUB: GooglePubSubClient,
+        ClientType.STREAMNATIVE: StreamNativeClient,
     }
     
     client_class = client_map.get(client_type)
