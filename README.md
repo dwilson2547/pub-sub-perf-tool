@@ -424,9 +424,51 @@ pub_sub_perf_tool/
 
 ### Running Tests
 
+#### Unit Tests
+
+Run all unit tests (fast, no external dependencies required):
+
+```bash
+pytest tests/ --ignore=tests/integration
+```
+
+#### Integration Tests with Testcontainers
+
+Integration tests use [Testcontainers](https://testcontainers.com/) to run real message broker instances in Docker containers. These tests validate end-to-end functionality with Kafka, RabbitMQ, and Pulsar.
+
+**Prerequisites:**
+- Docker must be installed and running
+- Sufficient system resources for running containers
+
+**Run all integration tests:**
+
+```bash
+pytest tests/integration/ -v
+```
+
+**Run specific integration tests:**
+
+```bash
+# Test Kafka integration
+pytest tests/integration/test_kafka_integration.py -v
+
+# Test RabbitMQ integration
+pytest tests/integration/test_rabbitmq_integration.py -v
+
+# Test Pulsar integration
+pytest tests/integration/test_pulsar_integration.py -v
+
+# Test complete message flows
+pytest tests/integration/test_flow_integration.py -v
+```
+
+**Run all tests (unit + integration):**
+
 ```bash
 pytest
 ```
+
+**Note:** Integration tests are slower than unit tests as they start Docker containers and perform actual network operations. See `tests/integration/README.md` for detailed documentation.
 
 ## License
 
