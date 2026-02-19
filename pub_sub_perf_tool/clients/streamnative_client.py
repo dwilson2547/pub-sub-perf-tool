@@ -41,9 +41,9 @@ class StreamNativeClient(PulsarClient):
         # Initialize parent class
         super().__init__(config)
         
-        # StreamNative typically uses SSL
+        # StreamNative typically uses SSL, set default if not provided
         if 'service_url' not in config:
-            self.service_url = config.get('service_url', 'pulsar+ssl://streamnative.cloud:6651')
+            self.service_url = 'pulsar+ssl://streamnative.cloud:6651'
     
     def connect(self) -> None:
         """Establish connection to StreamNative"""
