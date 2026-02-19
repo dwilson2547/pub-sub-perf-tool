@@ -8,6 +8,7 @@ from tabulate import tabulate
 
 from .flow_engine import MessageFlowEngine, Message, FlowResult
 from .base import Message as BaseMessage
+from .timeline.cli import capture as timeline_capture_cmd
 
 
 @click.group()
@@ -425,6 +426,10 @@ def _create_sample_config(client_types):
         config['hops'].append(hop_config)
     
     return config
+
+
+# Expose timeline capture as a sub-command of the main CLI
+main.add_command(timeline_capture_cmd, name='capture-timeline')
 
 
 if __name__ == '__main__':

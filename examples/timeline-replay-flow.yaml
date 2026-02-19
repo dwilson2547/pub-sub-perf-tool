@@ -1,0 +1,29 @@
+# Example: replay a captured timeline into a Kafka topic
+#
+# Usage:
+#   1. Capture a timeline from a real topic:
+#        pub-sub-timeline capture capture.json \
+#            --source-type kafka \
+#            --topic live-topic \
+#            --config-file kafka-config.yaml \
+#            --max-messages 1000
+#
+#   2. Replay the timeline through this flow:
+#        pub-sub-perf run timeline-replay-flow.yaml
+#
+# When a 'timeline:' source is used the --message / --count flags are
+# ignored and every captured entry is published at its original rate.
+
+name: timeline-replay-flow
+
+hops:
+  - name: replay-from-timeline
+    source: "timeline: capture.json"    # path to the captured timeline file
+    destination:
+      type: kafka
+      topic: replay-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: exists

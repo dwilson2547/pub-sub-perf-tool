@@ -28,6 +28,7 @@ dev = [
 
 [project.scripts]
 pub-sub-perf = "pub_sub_perf_tool.cli:main"
+pub-sub-timeline = "pub_sub_perf_tool.timeline.cli:timeline_main"
 
 [tool.setuptools.packages.find]
 where = ["."]
