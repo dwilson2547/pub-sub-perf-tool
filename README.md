@@ -105,8 +105,48 @@ hops:
 Each hop consists of:
 - **name**: Descriptive name for the hop
 - **source** (optional for first hop): Source pub-sub system configuration
+  - Can be a full configuration object (for backward compatibility)
+  - Can be a reference to a previous hop's destination using `"hop: hop-name"` syntax (recommended to reduce duplication)
 - **destination**: Destination pub-sub system configuration
 - **validation**: Validation rules to apply
+
+#### Source Reference Syntax
+
+To reduce duplication, intermediary hops can reference the destination of a previous hop by name:
+
+```yaml
+hops:
+  - name: initial-publish
+    destination:
+      type: kafka
+      topic: input-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+  
+  - name: intermediary-hop
+    source: "hop: initial-publish"  # References destination of "initial-publish"
+    destination:
+      type: kafka
+      topic: output-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+```
+
+This is equivalent to the full configuration but eliminates duplication:
+
+```yaml
+  - name: intermediary-hop
+    source:
+      type: kafka
+      topic: input-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    destination:
+      # ... destination config
+```
 
 ### Validation Types
 
@@ -138,7 +178,7 @@ Each hop consists of:
 
 ## Examples
 
-### Kafka Flow with Random Consumer Groups
+### Kafka Flow with Hop References
 
 ```yaml
 name: kafka-flow
@@ -153,12 +193,7 @@ hops:
         # consumer_group auto-generated to prevent conflicts
 
   - name: kafka-to-kafka
-    source:
-      type: kafka
-      topic: test-input
-      config:
-        bootstrap_servers:
-          - localhost:9092
+    source: "hop: publish-to-kafka"  # References previous hop's destination
     destination:
       type: kafka
       topic: test-output
@@ -180,12 +215,7 @@ hops:
         service_url: pulsar://localhost:6650
 
   - name: pulsar-intermediary
-    source:
-      type: pulsar
-      topic: persistent://public/default/input
-      config:
-        service_url: pulsar://localhost:6650
-        use_reader: true  # Use reader for intermediary hop
+    source: "hop: publish-to-pulsar"  # References previous hop's destination
     destination:
       type: pulsar
       topic: persistent://public/default/output
@@ -207,11 +237,7 @@ hops:
         bootstrap_servers: [localhost:9092]
 
   - name: kafka-to-pulsar
-    source:
-      type: kafka
-      topic: kafka-input
-      config:
-        bootstrap_servers: [localhost:9092]
+    source: "hop: kafka-publish"  # References kafka-publish destination
     destination:
       type: pulsar
       topic: persistent://public/default/intermediate
@@ -219,12 +245,7 @@ hops:
         service_url: pulsar://localhost:6650
 
   - name: pulsar-to-rabbitmq
-    source:
-      type: pulsar
-      topic: persistent://public/default/intermediate
-      config:
-        service_url: pulsar://localhost:6650
-        use_reader: true  # Reader for intermediary hop
+    source: "hop: kafka-to-pulsar"  # References kafka-to-pulsar destination
     destination:
       type: rabbitmq
       topic: output-queue
@@ -248,13 +269,7 @@ hops:
         consumer_group: $Default
 
   - name: eventhubs-to-kafka
-    source:
-      type: eventhubs
-      topic: test-eventhub
-      config:
-        connection_string: Endpoint=sb://my-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mykey
-        eventhub_name: test-eventhub
-        consumer_group: $Default
+    source: "hop: publish-to-eventhubs"  # References previous hop's destination
     destination:
       type: kafka
       topic: output-topic
@@ -276,12 +291,7 @@ hops:
         credentials_path: /path/to/service-account.json
 
   - name: pubsub-to-pulsar
-    source:
-      type: googlepubsub
-      topic: test-topic
-      config:
-        project_id: my-gcp-project
-        credentials_path: /path/to/service-account.json
+    source: "hop: publish-to-pubsub"  # References previous hop's destination
     destination:
       type: pulsar
       topic: persistent://public/default/output
@@ -308,18 +318,7 @@ hops:
           audience: urn:sn:pulsar:my-org:my-instance
 
   - name: streamnative-intermediary
-    source:
-      type: streamnative
-      topic: persistent://public/default/input
-      config:
-        service_url: pulsar+ssl://my-org.streamnative.cloud:6651
-        auth_params:
-          type: oauth2
-          issuer_url: https://auth.streamnative.cloud
-          client_id: my-client-id
-          client_secret: my-client-secret
-          audience: urn:sn:pulsar:my-org:my-instance
-        use_reader: true  # Use reader for intermediary hop
+    source: "hop: publish-to-streamnative"  # References previous hop's destination
     destination:
       type: streamnative
       topic: persistent://public/default/output
