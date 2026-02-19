@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pub_sub_perf_tool.base import Message
-from pub_sub_perf_tool.timeline.timeline import Timeline, TimelineEntry
+from pub_sub_perf_tool.timeline.timeline import Timeline, TimelineEntry, TimelineWriter
 from pub_sub_perf_tool.timeline.capture import TimelineCapture
 from pub_sub_perf_tool.flow_engine import MessageFlowEngine
 
@@ -379,3 +379,221 @@ class TestFlowEngineTimelineSource:
         assert published_msg.value == b'payload-A'
         assert published_msg.key == 'key-A'
         assert published_msg.headers == {'h': '1'}
+
+
+# ---------------------------------------------------------------------------
+# Timeline compressed save / load
+# ---------------------------------------------------------------------------
+
+class TestTimelineCompressed:
+    def test_save_and_load_compressed_round_trip(self, tmp_path):
+        tl = Timeline(
+            source_type='kafka',
+            source_topic='test-topic',
+            captured_at='2024-01-01T00:00:00+00:00',
+            entries=[
+                TimelineEntry(offset_ms=0.0, value=b'msg1', key='k1'),
+                TimelineEntry(offset_ms=500.0, value=b'\x00\xff\xfe', key=None,
+                              headers={'x': 'y'}),
+            ],
+        )
+        path = str(tmp_path / 'tl.timeline')
+        tl.save_compressed(path)
+
+        loaded = Timeline.load_compressed(path)
+        assert loaded.version == '2.0'
+        assert loaded.source_type == 'kafka'
+        assert loaded.source_topic == 'test-topic'
+        assert loaded.captured_at == tl.captured_at
+        assert len(loaded.entries) == 2
+        assert loaded.entries[0].value == b'msg1'
+        assert loaded.entries[0].key == 'k1'
+        assert loaded.entries[1].value == b'\x00\xff\xfe'
+        assert loaded.entries[1].headers == {'x': 'y'}
+
+    def test_compressed_file_is_smaller_than_json(self, tmp_path):
+        """Compressed binary format should be smaller than JSON for binary payloads."""
+        entries = [
+            TimelineEntry(offset_ms=float(i), value=bytes(range(256)) * 4, key=str(i))
+            for i in range(100)
+        ]
+        tl = Timeline(
+            source_type='kafka',
+            source_topic='bench',
+            captured_at='2024-01-01T00:00:00+00:00',
+            entries=entries,
+        )
+        json_path = str(tmp_path / 'tl.json')
+        compressed_path = str(tmp_path / 'tl.timeline')
+        tl.save(json_path)
+        tl.save_compressed(compressed_path)
+
+        assert os.path.getsize(compressed_path) < os.path.getsize(json_path)
+
+    def test_save_compressed_empty_timeline(self, tmp_path):
+        tl = Timeline(
+            source_type='rabbitmq',
+            source_topic='q',
+            captured_at='2024-01-01T00:00:00+00:00',
+        )
+        path = str(tmp_path / 'empty.timeline')
+        tl.save_compressed(path)
+        loaded = Timeline.load_compressed(path)
+        assert loaded.entries == []
+
+
+# ---------------------------------------------------------------------------
+# TimelineWriter
+# ---------------------------------------------------------------------------
+
+class TestTimelineWriter:
+    def test_single_chunk_writes_one_file(self, tmp_path):
+        writer = TimelineWriter(
+            str(tmp_path / 'capture.timeline'), chunk_size=0, worker_id=0
+        )
+        writer.open('kafka', 'topic', '2024-01-01T00:00:00+00:00')
+        for i in range(5):
+            writer.write_entry(TimelineEntry(offset_ms=float(i), value=f'v{i}'.encode()))
+        paths = writer.close()
+        assert len(paths) == 1
+        assert paths[0].endswith('_w0_p0.timeline')
+
+    def test_chunked_write_splits_into_parts(self, tmp_path):
+        writer = TimelineWriter(
+            str(tmp_path / 'capture'), chunk_size=3, worker_id=1
+        )
+        writer.open('kafka', 'topic', '2024-01-01T00:00:00+00:00')
+        for i in range(7):
+            writer.write_entry(TimelineEntry(offset_ms=float(i), value=b'x'))
+        paths = writer.close()
+        # 7 entries / chunk_size=3 → parts 0,1,2 (3+3+1)
+        assert len(paths) == 3
+        assert all(p.endswith('.timeline') for p in paths)
+        assert '_w1_p0.timeline' in paths[0]
+        assert '_w1_p1.timeline' in paths[1]
+        assert '_w1_p2.timeline' in paths[2]
+
+    def test_writer_files_are_readable_by_load_compressed(self, tmp_path):
+        writer = TimelineWriter(str(tmp_path / 'cap'), chunk_size=0, worker_id=0)
+        writer.open('pulsar', 'persistent://public/default/t', '2024-06-01T00:00:00+00:00')
+        writer.write_entry(TimelineEntry(offset_ms=0.0, value=b'hello', key='k'))
+        writer.write_entry(TimelineEntry(offset_ms=10.0, value=b'world'))
+        paths = writer.close()
+
+        loaded = Timeline.load_compressed(paths[0])
+        assert loaded.source_type == 'pulsar'
+        assert len(loaded.entries) == 2
+        assert loaded.entries[0].value == b'hello'
+        assert loaded.entries[0].key == 'k'
+        assert loaded.entries[1].value == b'world'
+
+    def test_writer_worker_id_in_filename(self, tmp_path):
+        writer = TimelineWriter(str(tmp_path / 'cap'), chunk_size=0, worker_id=7)
+        writer.open('kafka', 't', '2024-01-01T00:00:00+00:00')
+        writer.write_entry(TimelineEntry(offset_ms=0.0, value=b'x'))
+        paths = writer.close()
+        assert '_w7_p0' in paths[0]
+
+    def test_close_on_empty_writer_returns_empty_list(self, tmp_path):
+        writer = TimelineWriter(str(tmp_path / 'cap'), chunk_size=0, worker_id=0)
+        writer.open('kafka', 't', '2024-01-01T00:00:00+00:00')
+        paths = writer.close()
+        assert paths == []
+
+
+# ---------------------------------------------------------------------------
+# TimelineCapture – multi-worker config
+# ---------------------------------------------------------------------------
+
+class TestTimelineCaptureMultiWorker:
+    def test_kafka_multi_worker_shares_consumer_group(self):
+        cap = TimelineCapture('kafka', 'topic', {}, num_workers=4)
+        assert cap.config['consumer_group'].startswith('timeline-capture-')
+        # All workers use the same group (set once in __init__)
+
+    def test_pulsar_single_worker_uses_reader_mode(self):
+        cap = TimelineCapture('pulsar', 'topic', {}, num_workers=1)
+        assert cap.config.get('use_reader') is True
+
+    def test_pulsar_multi_worker_uses_shared_subscription(self):
+        cap = TimelineCapture('pulsar', 'topic', {}, num_workers=4)
+        assert 'use_reader' not in cap.config
+        assert cap.config.get('subscription_name', '').startswith('timeline-capture-')
+        assert cap.config['consumer_config']['subscription_type'] == 'Shared'
+
+    def test_streamnative_multi_worker_uses_shared_subscription(self):
+        cap = TimelineCapture('streamnative', 'topic', {}, num_workers=2)
+        assert 'use_reader' not in cap.config
+        assert cap.config.get('subscription_name', '').startswith('timeline-capture-')
+
+    def test_num_workers_defaults_to_one(self):
+        cap = TimelineCapture('kafka', 'topic', {})
+        assert cap.num_workers == 1
+
+    def test_capture_to_files_writes_compressed_parts(self, tmp_path):
+        """capture_to_files should create worker-specific compressed files."""
+        from pub_sub_perf_tool.base import ConsumeResult
+
+        def _make_result(value):
+            msg = Message(key=None, value=value, headers=None)
+            return ConsumeResult(message=msg, latency_ms=0.5)
+
+        def _empty():
+            return ConsumeResult(message=None, latency_ms=0.5)
+
+        with patch('pub_sub_perf_tool.timeline.capture.create_client') as mock_cc:
+            def make_mock_client():
+                mc = MagicMock()
+                mc.__enter__ = MagicMock(return_value=mc)
+                mc.__exit__ = MagicMock(return_value=False)
+                mc.consume.side_effect = [
+                    _make_result(b'a'), _make_result(b'b'), _empty()
+                ]
+                return mc
+            mock_cc.side_effect = lambda *a, **kw: make_mock_client()
+
+            cap = TimelineCapture('kafka', 'my-topic', {}, num_workers=2)
+            paths = cap.capture_to_files(
+                output_base=str(tmp_path / 'cap'),
+                max_messages=4,
+                timeout_ms=100,
+                chunk_size=0,
+            )
+
+        assert len(paths) == 2
+        assert all(p.endswith('.timeline') for p in paths)
+        # Each file should be a valid compressed timeline
+        for p in paths:
+            tl = Timeline.load_compressed(p)
+            assert tl.source_type == 'kafka'
+            assert tl.source_topic == 'my-topic'
+
+    def test_capture_to_files_progress_callback(self, tmp_path):
+        """on_progress should be called with running total."""
+        from pub_sub_perf_tool.base import ConsumeResult
+
+        def _make_result(value):
+            msg = Message(key=None, value=value, headers=None)
+            return ConsumeResult(message=msg, latency_ms=0.5)
+
+        def _empty():
+            return ConsumeResult(message=None, latency_ms=0.5)
+
+        with patch('pub_sub_perf_tool.timeline.capture.create_client') as mock_cc:
+            mc = MagicMock()
+            mc.__enter__ = MagicMock(return_value=mc)
+            mc.__exit__ = MagicMock(return_value=False)
+            mc.consume.side_effect = [_make_result(b'x'), _empty()]
+            mock_cc.return_value = mc
+
+            counts = []
+            cap = TimelineCapture('kafka', 't', {}, num_workers=1)
+            cap.capture_to_files(
+                output_base=str(tmp_path / 'cap'),
+                max_messages=10,
+                timeout_ms=100,
+                chunk_size=0,
+                on_progress=lambda c: counts.append(c),
+            )
+
+        assert counts == [1]
