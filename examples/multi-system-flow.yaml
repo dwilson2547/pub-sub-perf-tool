@@ -18,12 +18,7 @@ hops:
 
   # Hop 2: Kafka -> Pulsar (with Pulsar reader)
   - name: kafka-to-pulsar
-    source:
-      type: kafka
-      topic: kafka-input
-      config:
-        bootstrap_servers:
-          - localhost:9092
+    source: "hop: kafka-publish"
     destination:
       type: pulsar
       topic: persistent://public/default/pulsar-intermediate
@@ -36,12 +31,7 @@ hops:
 
   # Hop 3: Pulsar -> RabbitMQ (using Pulsar reader for intermediary hop)
   - name: pulsar-to-rabbitmq
-    source:
-      type: pulsar
-      topic: persistent://public/default/pulsar-intermediate
-      config:
-        service_url: pulsar://localhost:6650
-        use_reader: true  # Use reader for intermediary hop
+    source: "hop: kafka-to-pulsar"
     destination:
       type: rabbitmq
       topic: rabbitmq-output

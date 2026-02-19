@@ -180,6 +180,42 @@ class MessageFlowEngine:
         self.hops_config = flow_config.get('hops', [])
         
         self.validator = Validator()
+        self._resolve_hop_references()
+    
+    def _resolve_hop_references(self):
+        """Resolve source references to previous hop destinations
+        
+        Allows intermediary hops to reference previous hop destinations by name
+        instead of duplicating the entire configuration.
+        
+        Example:
+            source: "hop: initial-publish"  # References destination of hop named "initial-publish"
+        """
+        # Build a map of hop names to their destination configs
+        hop_destinations = {}
+        
+        for hop_config in self.hops_config:
+            hop_name = hop_config.get('name')
+            if hop_name and 'destination' in hop_config:
+                hop_destinations[hop_name] = hop_config['destination']
+        
+        # Resolve source references
+        for hop_config in self.hops_config:
+            source = hop_config.get('source')
+            
+            # Check if source is a string reference (e.g., "hop: hop-name")
+            if isinstance(source, str):
+                if source.startswith('hop:'):
+                    # Extract the referenced hop name
+                    referenced_hop = source[4:].strip()
+                    
+                    # Look up the referenced hop's destination
+                    if referenced_hop in hop_destinations:
+                        hop_config['source'] = hop_destinations[referenced_hop].copy()
+                    else:
+                        raise ValueError(f"Cannot resolve hop reference: '{referenced_hop}' not found")
+                else:
+                    raise ValueError(f"Invalid source reference format: '{source}'. Expected 'hop: hop-name'")
     
     def execute(self, initial_message: Message, num_messages: int = 1) -> FlowResult:
         """Execute the message flow

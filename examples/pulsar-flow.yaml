@@ -18,12 +18,7 @@ hops:
 
   # Second hop: use reader for intermediary consumption
   - name: pulsar-intermediary
-    source:
-      type: pulsar
-      topic: persistent://public/default/test-input
-      config:
-        service_url: pulsar://localhost:6650
-        use_reader: true  # Use reader as specified in requirements
+    source: "hop: initial-publish"
     destination:
       type: pulsar
       topic: persistent://public/default/test-output

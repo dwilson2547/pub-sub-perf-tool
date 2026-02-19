@@ -1,6 +1,6 @@
 """Unit tests for flow engine"""
 import pytest
-from pub_sub_perf_tool.flow_engine import ClientType, create_client
+from pub_sub_perf_tool.flow_engine import ClientType, create_client, MessageFlowEngine
 from pub_sub_perf_tool.clients import (
     KafkaClient,
     PulsarClient,
@@ -64,3 +64,178 @@ def test_create_streamnative_client():
         {'service_url': 'pulsar+ssl://streamnative.cloud:6651'}
     )
     assert isinstance(client, StreamNativeClient)
+
+
+def test_hop_reference_resolution():
+    """Test that hop references are properly resolved"""
+    flow_config = {
+        'name': 'test-flow',
+        'hops': [
+            {
+                'name': 'first-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            },
+            {
+                'name': 'second-hop',
+                'source': 'hop: first-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'output-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            }
+        ]
+    }
+    
+    engine = MessageFlowEngine(flow_config)
+    
+    # Verify that the source reference was resolved
+    assert 'source' in engine.hops_config[1]
+    assert isinstance(engine.hops_config[1]['source'], dict)
+    assert engine.hops_config[1]['source']['type'] == 'kafka'
+    assert engine.hops_config[1]['source']['topic'] == 'test-topic'
+    assert engine.hops_config[1]['source']['config']['bootstrap_servers'] == ['localhost:9092']
+
+
+def test_hop_reference_with_multiple_hops():
+    """Test that hop references work with multiple intermediary hops"""
+    flow_config = {
+        'name': 'multi-hop-flow',
+        'hops': [
+            {
+                'name': 'kafka-publish',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'kafka-input',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            },
+            {
+                'name': 'kafka-to-pulsar',
+                'source': 'hop: kafka-publish',
+                'destination': {
+                    'type': 'pulsar',
+                    'topic': 'pulsar-intermediate',
+                    'config': {'service_url': 'pulsar://localhost:6650'}
+                }
+            },
+            {
+                'name': 'pulsar-to-rabbitmq',
+                'source': 'hop: kafka-to-pulsar',
+                'destination': {
+                    'type': 'rabbitmq',
+                    'topic': 'rabbitmq-output',
+                    'config': {'host': 'localhost', 'port': 5672}
+                }
+            }
+        ]
+    }
+    
+    engine = MessageFlowEngine(flow_config)
+    
+    # Verify second hop
+    assert engine.hops_config[1]['source']['type'] == 'kafka'
+    assert engine.hops_config[1]['source']['topic'] == 'kafka-input'
+    
+    # Verify third hop
+    assert engine.hops_config[2]['source']['type'] == 'pulsar'
+    assert engine.hops_config[2]['source']['topic'] == 'pulsar-intermediate'
+
+
+def test_hop_reference_invalid_name():
+    """Test that invalid hop reference raises error"""
+    flow_config = {
+        'name': 'test-flow',
+        'hops': [
+            {
+                'name': 'first-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            },
+            {
+                'name': 'second-hop',
+                'source': 'hop: non-existent-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'output-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            }
+        ]
+    }
+    
+    with pytest.raises(ValueError, match="Cannot resolve hop reference: 'non-existent-hop' not found"):
+        MessageFlowEngine(flow_config)
+
+
+def test_hop_reference_invalid_format():
+    """Test that invalid reference format raises error"""
+    flow_config = {
+        'name': 'test-flow',
+        'hops': [
+            {
+                'name': 'first-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            },
+            {
+                'name': 'second-hop',
+                'source': 'invalid-reference-format',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'output-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            }
+        ]
+    }
+    
+    with pytest.raises(ValueError, match="Invalid source reference format"):
+        MessageFlowEngine(flow_config)
+
+
+def test_backward_compatibility_with_full_source_config():
+    """Test that full source config (old format) still works"""
+    flow_config = {
+        'name': 'test-flow',
+        'hops': [
+            {
+                'name': 'first-hop',
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            },
+            {
+                'name': 'second-hop',
+                'source': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                },
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'output-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']}
+                }
+            }
+        ]
+    }
+    
+    engine = MessageFlowEngine(flow_config)
+    
+    # Verify that the full config is preserved
+    assert engine.hops_config[1]['source']['type'] == 'kafka'
+    assert engine.hops_config[1]['source']['topic'] == 'test-topic'
+
