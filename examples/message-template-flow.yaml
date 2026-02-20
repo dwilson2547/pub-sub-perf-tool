@@ -1,0 +1,38 @@
+# Example flow using a message template source
+#
+# The first hop reads a template file and a CSV values file.  For each row
+# in the CSV, the placeholders in the template (e.g. {field}) are replaced
+# with the corresponding column values and the resulting message is published.
+#
+# Usage:
+#   pub-sub-perf run examples/message-template-flow.yaml
+#
+# Template file example (message_template.txt):
+#   {"id": "{id}", "name": "{name}", "status": "{status}"}
+#
+# CSV values file example (values.csv):
+#   id,name,status
+#   1,Alice,active
+#   2,Bob,inactive
+
+name: message-template-flow
+
+hops:
+  - name: publish-from-template
+    source:
+      type: message_template
+      template_file: /path/to/message_template.txt
+      values_file: /path/to/values.csv
+    destination:
+      type: kafka
+      topic: events
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: json_schema
+      params:
+        required_fields:
+          - id
+          - name
+          - status

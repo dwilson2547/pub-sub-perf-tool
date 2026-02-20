@@ -44,20 +44,25 @@ def run(config_file, message, message_file, key, count, output):
             config = json.load(f)
     
     # Prepare message
+    first_hop_source = config.get('hops', [{}])[0].get('source', {}) if config.get('hops') else {}
+    uses_template_source = isinstance(first_hop_source, dict) and first_hop_source.get('type') == 'message_template'
+
     if message_file:
         with open(message_file, 'rb') as f:
             message_content = f.read()
     elif message:
         message_content = message.encode('utf-8')
+    elif uses_template_source:
+        message_content = None
     else:
         click.echo("Error: Either --message or --message-file must be provided", err=True)
         sys.exit(1)
-    
+
     msg = BaseMessage(
         key=key,
         value=message_content,
         headers=config.get('message_headers', {})
-    )
+    ) if message_content is not None else None
     
     # Execute flow
     click.echo(f"Executing flow: {config.get('name', 'unnamed')}")
