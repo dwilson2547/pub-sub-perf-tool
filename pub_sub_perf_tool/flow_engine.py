@@ -25,6 +25,115 @@ from .clients import (
 _TEMPLATE_PLACEHOLDER_RE = re.compile(r'\{([^{}]+)\}')
 
 
+@dataclass
+class StepConfig:
+    """Configuration for step-based rate control.
+
+    Attributes:
+        step_size: Number of messages per second to add at each step interval.
+        step_interval_seconds: How often (in seconds) to increase the rate.
+        max_rate: The maximum publish rate (messages per second).  Required
+            when step control is used.
+    """
+    step_size: float
+    step_interval_seconds: float
+    max_rate: float
+
+    def __post_init__(self):
+        if self.step_size <= 0:
+            raise ValueError("step_size must be greater than 0")
+        if self.step_interval_seconds <= 0:
+            raise ValueError("step_interval_seconds must be greater than 0")
+        if self.max_rate <= 0:
+            raise ValueError("max_rate must be greater than 0")
+
+
+@dataclass
+class FlowControlConfig:
+    """Configuration for publish rate control.
+
+    Attributes:
+        rate_per_second: The desired publish rate (messages per second).  When
+            *step* is also provided this acts as the initial rate.
+        step: Optional step configuration.  When provided the publish rate
+            increases by ``step.step_size`` messages per second every
+            ``step.step_interval_seconds`` seconds until ``step.max_rate`` is
+            reached.
+    """
+    rate_per_second: float
+    step: Optional[StepConfig] = None
+
+    def __post_init__(self):
+        if self.rate_per_second <= 0:
+            raise ValueError("rate_per_second must be greater than 0")
+        if self.step is not None and self.step.max_rate < self.rate_per_second:
+            raise ValueError(
+                "step.max_rate must be greater than or equal to rate_per_second"
+            )
+
+
+class RateLimiter:
+    """Controls the message publish rate with optional step-up support.
+
+    Usage::
+
+        limiter = RateLimiter(flow_control_config)
+        for message in messages:
+            limiter.wait()          # blocks until the next send slot
+            publish(message)
+
+    The first call to :meth:`wait` never blocks (it just starts the clock).
+    Subsequent calls sleep for however long is needed to honour the current
+    target rate.  If processing falls behind, the clock is not wound back so
+    the rate limiter will not attempt to burst to "catch up".
+    """
+
+    def __init__(self, config: FlowControlConfig):
+        self._config = config
+        self._start_time: Optional[float] = None
+        self._next_send: float = 0.0
+        self._current_rate: float = config.rate_per_second
+
+    def _update_rate(self, now: float) -> None:
+        """Recalculate the current rate based on elapsed time and step config."""
+        step = self._config.step
+        if step is None:
+            return
+        elapsed = now - self._start_time
+        steps = int(elapsed / step.step_interval_seconds)
+        new_rate = self._config.rate_per_second + steps * step.step_size
+        self._current_rate = min(new_rate, step.max_rate)
+
+    def wait(self) -> None:
+        """Block until the next message may be published, then return."""
+        now = time.time()
+        if self._start_time is None:
+            self._start_time = now
+            self._next_send = now
+            # Schedule the second message relative to the first
+            if self._current_rate > 0:
+                self._next_send = now + 1.0 / self._current_rate
+            return  # First message – no delay
+
+        sleep_s = self._next_send - now
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+        # Recalculate rate after sleeping so the step schedule is respected.
+        self._update_rate(time.time())
+
+        # Advance the send pointer.  Clamp to "now" to avoid accumulating a
+        # backlog when processing is slower than the target rate.
+        actual = max(time.time(), self._next_send)
+        if self._current_rate > 0:
+            self._next_send = actual + 1.0 / self._current_rate
+
+    @property
+    def current_rate(self) -> float:
+        """Return the current target publish rate (messages per second)."""
+        return self._current_rate
+
+
 class ClientType(Enum):
     """Supported pub-sub client types"""
     KAFKA = "kafka"
@@ -206,13 +315,51 @@ class MessageFlowEngine:
             flow_config: Flow configuration dict with keys:
                 - name: Flow name
                 - hops: List of hop configurations
+                - flow_control: Optional rate-control configuration (see
+                  :class:`FlowControlConfig`).  Ignored for timeline sources.
         """
         self.flow_config = flow_config
         self.flow_name = flow_config.get('name', 'unnamed-flow')
         self.hops_config = flow_config.get('hops', [])
+        self.flow_control: Optional[FlowControlConfig] = self._parse_flow_control(
+            flow_config.get('flow_control')
+        )
 
         self.validator = Validator()
         self._resolve_hop_references()
+
+    @staticmethod
+    def _parse_flow_control(cfg: Optional[Dict[str, Any]]) -> Optional[FlowControlConfig]:
+        """Parse a ``flow_control`` config dict into a :class:`FlowControlConfig`.
+
+        Returns ``None`` when *cfg* is ``None`` or empty.
+
+        Raises:
+            ValueError: If the configuration is invalid (e.g. step control used
+                without a ``max_rate``, or non-positive rate values).
+        """
+        if cfg is None:
+            return None
+
+        rate = cfg.get('rate_per_second')
+        if rate is None:
+            raise ValueError("flow_control requires 'rate_per_second'")
+
+        step_cfg = cfg.get('step')
+        step: Optional[StepConfig] = None
+        if step_cfg:
+            max_rate = step_cfg.get('max_rate')
+            if max_rate is None:
+                raise ValueError(
+                    "flow_control.step requires 'max_rate' when step control is used"
+                )
+            step = StepConfig(
+                step_size=step_cfg['step_size'],
+                step_interval_seconds=step_cfg['step_interval_seconds'],
+                max_rate=max_rate,
+            )
+
+        return FlowControlConfig(rate_per_second=rate, step=step)
 
     def _resolve_hop_references(self):
         """Resolve source references to previous hop destinations
@@ -283,8 +430,15 @@ class MessageFlowEngine:
         start_time = time.time()
         flow_result = FlowResult(flow_name=self.flow_name, success=True)
 
+        rate_limiter: Optional[RateLimiter] = (
+            RateLimiter(self.flow_control) if self.flow_control else None
+        )
+
         try:
             for msg_idx in range(num_messages):
+                if rate_limiter is not None:
+                    rate_limiter.wait()
+
                 current_message = initial_message
 
                 for hop_idx, hop_config in enumerate(self.hops_config):
@@ -350,10 +504,17 @@ class MessageFlowEngine:
         start_time = time.time()
         flow_result = FlowResult(flow_name=self.flow_name, success=True)
 
+        rate_limiter: Optional[RateLimiter] = (
+            RateLimiter(self.flow_control) if self.flow_control else None
+        )
+
         try:
             with open(values_file, 'r', newline='') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
+                    if rate_limiter is not None:
+                        rate_limiter.wait()
+
                     current_message = Message(key=None, value=_render(row).encode('utf-8'))
 
                     for hop_idx, hop_config in enumerate(self.hops_config):
