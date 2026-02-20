@@ -322,3 +322,142 @@ def test_hop_reference_forward_allowed():
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Message template source tests
+# ---------------------------------------------------------------------------
+
+def test_message_template_resolution_does_not_raise():
+    """Test that a message_template source dict is accepted without error"""
+    flow_config = {
+        'name': 'template-flow',
+        'hops': [
+            {
+                'name': 'publish-from-template',
+                'source': {
+                    'type': 'message_template',
+                    'template_file': '/tmp/template.txt',
+                    'values_file': '/tmp/values.csv',
+                },
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }
+        ],
+    }
+    # Should not raise during initialisation
+    engine = MessageFlowEngine(flow_config)
+    assert engine.hops_config[0]['source']['type'] == 'message_template'
+
+
+def test_execute_with_message_template(tmp_path, monkeypatch):
+    """Test that _execute_with_message_template generates messages from template+CSV"""
+    from unittest.mock import MagicMock, patch
+    from pub_sub_perf_tool.base import Message
+    from pub_sub_perf_tool.flow_engine import MessageFlowEngine
+
+    # Create template file
+    template_file = tmp_path / "template.txt"
+    template_file.write_text('{"id": "{id}", "name": "{name}"}')
+
+    # Create CSV values file
+    values_file = tmp_path / "values.csv"
+    values_file.write_text("id,name\n1,Alice\n2,Bob\n")
+
+    flow_config = {
+        'name': 'template-flow',
+        'hops': [
+            {
+                'name': 'publish-from-template',
+                'source': {
+                    'type': 'message_template',
+                    'template_file': str(template_file),
+                    'values_file': str(values_file),
+                },
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }
+        ],
+    }
+
+    engine = MessageFlowEngine(flow_config)
+
+    # Capture messages passed to _execute_hop
+    published_messages = []
+
+    def fake_execute_hop(hop_index, hop_config, message):
+        from pub_sub_perf_tool.flow_engine import HopResult
+        published_messages.append(message)
+        return HopResult(hop_index=hop_index, hop_name='publish-from-template', success=True)
+
+    monkeypatch.setattr(engine, '_execute_hop', fake_execute_hop)
+
+    result = engine.execute()
+
+    assert result.success
+    assert result.messages_processed == 2
+    assert len(published_messages) == 2
+    assert published_messages[0].value == b'{"id": "1", "name": "Alice"}'
+    assert published_messages[1].value == b'{"id": "2", "name": "Bob"}'
+
+
+def test_execute_with_message_template_missing_template_file(tmp_path):
+    """Test that missing template_file raises ValueError"""
+    values_file = tmp_path / "values.csv"
+    values_file.write_text("id\n1\n")
+
+    flow_config = {
+        'name': 'template-flow',
+        'hops': [
+            {
+                'name': 'hop',
+                'source': {
+                    'type': 'message_template',
+                    'values_file': str(values_file),
+                },
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }
+        ],
+    }
+
+    engine = MessageFlowEngine(flow_config)
+    with pytest.raises(ValueError, match="requires 'template_file'"):
+        engine.execute()
+
+
+def test_execute_with_message_template_missing_values_file(tmp_path):
+    """Test that missing values_file raises ValueError"""
+    template_file = tmp_path / "template.txt"
+    template_file.write_text("hello {name}")
+
+    flow_config = {
+        'name': 'template-flow',
+        'hops': [
+            {
+                'name': 'hop',
+                'source': {
+                    'type': 'message_template',
+                    'template_file': str(template_file),
+                },
+                'destination': {
+                    'type': 'kafka',
+                    'topic': 'test-topic',
+                    'config': {'bootstrap_servers': ['localhost:9092']},
+                },
+            }
+        ],
+    }
+
+    engine = MessageFlowEngine(flow_config)
+    with pytest.raises(ValueError, match="requires 'values_file'"):
+        engine.execute()

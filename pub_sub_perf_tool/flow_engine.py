@@ -1,6 +1,7 @@
 """Message flow engine with validation support"""
 from typing import Any, Dict, Generator, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field
+import csv
 import glob
 import re
 import time
@@ -18,6 +19,10 @@ from .clients import (
     GooglePubSubClient,
     StreamNativeClient
 )
+
+# Matches ``{placeholder}`` tokens in message templates where the placeholder
+# name contains no nested braces.  Compiled at module level for reuse.
+_TEMPLATE_PLACEHOLDER_RE = re.compile(r'\{([^{}]+)\}')
 
 
 class ClientType(Enum):
@@ -251,8 +256,10 @@ class MessageFlowEngine:
         """Execute the message flow
 
         Args:
-            initial_message: Initial message to send (ignored when using a timeline source)
-            num_messages: Number of messages to process (ignored when using a timeline source)
+            initial_message: Initial message to send (ignored when using a timeline or
+                message_template source)
+            num_messages: Number of messages to process (ignored when using a timeline or
+                message_template source)
 
         Returns:
             FlowResult with execution details
@@ -265,6 +272,10 @@ class MessageFlowEngine:
             pod_id = int(first_hop.get('pod_id', self.flow_config.get('pod_id', 0)))
             num_pods = int(first_hop.get('num_pods', self.flow_config.get('num_pods', 1)))
             return self._execute_with_timeline_path(timeline_path, pod_id, num_pods)
+
+        # Check if the first hop uses a message_template source
+        if isinstance(first_hop_source, dict) and first_hop_source.get('type') == 'message_template':
+            return self._execute_with_message_template(first_hop_source)
 
         if initial_message is None:
             raise ValueError("initial_message is required when not using a timeline source")
@@ -290,6 +301,75 @@ class MessageFlowEngine:
                         pass
 
                 flow_result.messages_processed += 1
+
+        except Exception as e:
+            flow_result.success = False
+            flow_result.hops.append(HopResult(
+                hop_index=-1,
+                hop_name="error",
+                success=False,
+                error=str(e)
+            ))
+
+        flow_result.total_time_ms = (time.time() - start_time) * 1000
+        return flow_result
+
+    def _execute_with_message_template(self, template_source: Dict[str, Any]) -> FlowResult:
+        """Execute the message flow by generating messages from a template and CSV values file.
+
+        Each row in the CSV file produces one message by substituting the row's values
+        into the template using ``{column_name}`` placeholders.  The first row of the CSV
+        must be a header row that defines the placeholder names.
+
+        Args:
+            template_source: Source configuration dict with keys:
+                - template_file: Path to the message template file containing
+                  ``{column_name}`` placeholders.
+                - values_file: Path to the CSV file whose header row names the
+                  placeholders and whose subsequent rows supply the values.
+
+        Returns:
+            FlowResult with execution details.
+        """
+        template_file = template_source.get('template_file')
+        values_file = template_source.get('values_file')
+
+        if not template_file:
+            raise ValueError("message_template source requires 'template_file'")
+        if not values_file:
+            raise ValueError("message_template source requires 'values_file'")
+
+        with open(template_file, 'r') as f:
+            template = f.read()
+
+        def _render(row: Dict[str, str]) -> str:
+            return _TEMPLATE_PLACEHOLDER_RE.sub(
+                lambda m: row.get(m.group(1), m.group(0)), template
+            )
+
+        start_time = time.time()
+        flow_result = FlowResult(flow_name=self.flow_name, success=True)
+
+        try:
+            with open(values_file, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    current_message = Message(key=None, value=_render(row).encode('utf-8'))
+
+                    for hop_idx, hop_config in enumerate(self.hops_config):
+                        if hop_idx == 0:
+                            hop_cfg = {k: v for k, v in hop_config.items() if k != 'source'}
+                        else:
+                            hop_cfg = hop_config
+
+                        hop_result = self._execute_hop(hop_idx, hop_cfg, current_message)
+                        flow_result.hops.append(hop_result)
+
+                        if not hop_result.success:
+                            flow_result.success = False
+                            break
+
+                    flow_result.messages_processed += 1
 
         except Exception as e:
             flow_result.success = False
