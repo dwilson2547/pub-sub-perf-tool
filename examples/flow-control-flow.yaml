@@ -1,0 +1,42 @@
+# Example flow demonstrating publish rate control (flow control)
+#
+# Two examples are shown below.
+#
+# Example 1 – Constant load
+#   Publishes at a steady 10,000 messages per second per pod.
+#
+# Example 2 – Step ramp-up (uncomment to use)
+#   Starts at 1,000 msg/s and increases by 100 msg/s every 30 seconds until
+#   the maximum of 5,000 msg/s is reached.
+#
+# Flow control is available for all source types except "timeline".
+#
+# Usage:
+#   pub-sub-perf run examples/flow-control-flow.yaml --message "test" --count 100000
+
+# Example 1: Constant rate
+name: constant-rate-flow
+
+flow_control:
+  rate_per_second: 10000   # publish 10,000 messages per second per pod
+
+hops:
+  - name: publish-to-kafka
+    destination:
+      type: kafka
+      topic: perf-test-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: exists
+
+# ---------------------------------------------------------------------------
+# Example 2: Step ramp-up (replace the flow_control section above with this)
+# ---------------------------------------------------------------------------
+# flow_control:
+#   rate_per_second: 1000          # initial rate: 1,000 msg/s
+#   step:
+#     step_size: 100               # increase by 100 msg/s per interval
+#     step_interval_seconds: 30    # step up every 30 seconds
+#     max_rate: 5000               # required: cap at 5,000 msg/s
