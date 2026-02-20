@@ -47,6 +47,31 @@ source:
 - Reader mode used for intermediary hops to avoid subscription conflicts
 - Consumer mode available for final consumption
 
+#### 6. ✅ Publish Rate Flow Control
+
+Configurable per-pod publish rate limiting for all source types except `timeline` (which already controls timing via recorded offsets).
+
+**Constant rate:**
+```yaml
+flow_control:
+  rate_per_second: 10000
+```
+
+**Step ramp-up (`max_rate` required):**
+```yaml
+flow_control:
+  rate_per_second: 1000
+  step:
+    step_size: 100
+    step_interval_seconds: 30
+    max_rate: 5000
+```
+
+New abstractions in `flow_engine.py`:
+- `StepConfig` — `step_size`, `step_interval_seconds`, `max_rate`
+- `FlowControlConfig` — `rate_per_second` + optional `StepConfig`
+- `RateLimiter` — schedules sends via a next-slot pointer; first call is free, no burst catch-up on lag
+
 ### Architecture
 
 #### Core Components
@@ -61,13 +86,26 @@ source:
    - `pulsar_client.py`: Pulsar with reader support
    - `rabbitmq_client.py`: RabbitMQ with exchange/queue support
    - `iggy_client.py`: Iggy placeholder implementation
+   - `eventhubs_client.py`: Azure Event Hubs integration
+   - `googlepubsub_client.py`: Google Cloud Pub/Sub integration
+   - `streamnative_client.py`: StreamNative Cloud (managed Pulsar)
 
 3. **flow_engine.py** - Flow execution
    - `MessageFlowEngine`: Executes multi-hop flows
    - `Validator`: Validates messages between hops
+   - `RateLimiter`: Publish rate control with optional step ramp-up
+   - `FlowControlConfig`, `StepConfig`: Rate control configuration
    - `HopResult`, `FlowResult`: Execution results
 
-4. **cli.py** - Command-line interface
+4. **serialization/** - Message serialization
+   - `avro.py`: Avro schema serialization/deserialization
+
+5. **timeline/** - Timeline capture and replay
+   - `capture.py`: Captures message timelines
+   - `timeline.py`: Replays recorded timelines
+   - `cli.py`: Timeline-specific CLI commands
+
+6. **cli.py** - Command-line interface
    - `run`: Execute flows
    - `generate-config`: Create sample configs
    - `validate-config`: Validate configurations
@@ -124,11 +162,15 @@ pub-sub-perf run flow.yaml --message "test" --output table
 1. **README.md** - Comprehensive project documentation
 2. **GETTING_STARTED.md** - Quick start guide
 3. **demo.py** - Interactive demonstration
-4. **examples/** - Four complete example configurations
-   - kafka-flow.yaml
-   - pulsar-flow.yaml
-   - multi-system-flow.yaml
-   - rabbitmq-flow.yaml
+4. **examples/** - Complete example configurations
+   - `kafka-flow.yaml`
+   - `pulsar-flow.yaml`
+   - `multi-system-flow.yaml`
+   - `rabbitmq-flow.yaml`
+   - `avro-kafka-flow.yaml`
+   - `flow-control-flow.yaml`
+   - `message-template-flow.yaml`
+   - `timeline-replay-flow.yaml`
 
 ### Code Quality
 
@@ -154,24 +196,39 @@ pub-sub-perf-tool/
 │   ├── kafka-flow.yaml
 │   ├── pulsar-flow.yaml
 │   ├── multi-system-flow.yaml
-│   └── rabbitmq-flow.yaml
+│   ├── rabbitmq-flow.yaml
+│   ├── avro-kafka-flow.yaml
+│   ├── flow-control-flow.yaml
+│   ├── message-template-flow.yaml
+│   └── timeline-replay-flow.yaml
 ├── pub_sub_perf_tool/          # Main package
 │   ├── __init__.py
 │   ├── base.py                # Abstraction layer
 │   ├── cli.py                 # CLI interface
-│   ├── flow_engine.py         # Flow execution
-│   └── clients/               # Client implementations
-│       ├── kafka_client.py
-│       ├── pulsar_client.py
-│       ├── rabbitmq_client.py
-│       └── iggy_client.py
+│   ├── flow_engine.py         # Flow execution + rate control
+│   ├── clients/               # Client implementations
+│   │   ├── kafka_client.py
+│   │   ├── pulsar_client.py
+│   │   ├── rabbitmq_client.py
+│   │   ├── iggy_client.py
+│   │   ├── eventhubs_client.py
+│   │   ├── googlepubsub_client.py
+│   │   └── streamnative_client.py
+│   ├── serialization/
+│   │   └── avro.py
+│   └── timeline/
+│       ├── capture.py
+│       ├── cli.py
+│       └── timeline.py
 └── tests/                      # Test suite
     ├── test_base.py
     ├── test_kafka_client.py
     ├── test_pulsar_client.py
     ├── test_validation.py
     ├── test_flow_engine.py
-    └── test_package.py
+    ├── test_avro_serialization.py
+    ├── test_timeline.py
+    └── integration/
 ```
 
 ### Key Achievements
@@ -181,9 +238,13 @@ pub-sub-perf-tool/
 3. ✅ **Pulsar reader support** - Configurable for intermediary hops
 4. ✅ **Flexible validation** - Multiple validation types
 5. ✅ **Performance tracking** - Detailed latency metrics
-6. ✅ **Comprehensive testing** - 21 unit tests, all passing
-7. ✅ **Good documentation** - README, guide, examples, demo
-8. ✅ **Security validated** - No vulnerabilities found
+6. ✅ **Publish rate flow control** - Constant-rate and step ramp-up modes
+7. ✅ **Multi-system support** - Kafka, Pulsar, RabbitMQ, Iggy, Azure EventHubs, Google Pub/Sub, StreamNative
+8. ✅ **Avro serialization** - Schema-based serialization support
+9. ✅ **Timeline capture & replay** - Record and replay message timelines
+10. ✅ **Comprehensive testing** - Unit and integration tests
+11. ✅ **Good documentation** - README, guide, examples, demo
+12. ✅ **Security validated** - No vulnerabilities found
 
 ### Usage Example
 
@@ -224,6 +285,10 @@ The pub-sub performance tool has been successfully implemented with all requirem
 - ✅ Abstraction layer for seamless integration
 - ✅ Kafka with random consumer groups
 - ✅ Pulsar with reader support
+- ✅ Azure EventHubs, Google Pub/Sub, and StreamNative support
+- ✅ Publish rate flow control (constant and step ramp-up)
+- ✅ Avro serialization
+- ✅ Timeline capture and replay
 - ✅ Full documentation and testing
 
 The tool is ready for use and can be extended with additional messaging systems or validation types as needed.

@@ -9,6 +9,7 @@ A generic pub-sub performance testing tool with a focus on validation across mul
 - **Message Flow Definition**: Define complex flows with multiple intermediary hops
 - **Validation Framework**: Validate messages between each hop
 - **Performance Monitoring**: Track latency and throughput metrics
+- **Publish Rate Flow Control**: Limit publish rate with constant-rate or step ramp-up modes
 - **Flexible Configuration**: YAML/JSON-based configuration
 
 ## Key Capabilities
@@ -176,6 +177,30 @@ This is equivalent to the full configuration but eliminates duplication:
        max_bytes: 1000000
    ```
 
+### Flow Control (Publish Rate Limiting)
+
+Optionally limit the publish rate by adding a top-level `flow_control` section to your configuration. Flow control is available for all source types **except** `timeline` (which already governs timing via recorded offsets).
+
+**Constant rate:**
+
+```yaml
+flow_control:
+  rate_per_second: 10000   # publish 10,000 messages per second per pod
+```
+
+**Step ramp-up** (gradually increases rate up to a maximum):
+
+```yaml
+flow_control:
+  rate_per_second: 1000          # initial rate
+  step:
+    step_size: 100               # increase by 100 msg/s per interval
+    step_interval_seconds: 30    # step up every 30 seconds
+    max_rate: 5000               # required: cap at 5,000 msg/s
+```
+
+See `examples/flow-control-flow.yaml` for a runnable reference covering both constant-rate and step ramp-up configurations.
+
 ## Examples
 
 ### Kafka Flow with Hop References
@@ -332,6 +357,50 @@ hops:
           audience: urn:sn:pulsar:my-org:my-instance
 ```
 
+### Flow Control – Constant Rate
+
+```yaml
+name: constant-rate-flow
+
+flow_control:
+  rate_per_second: 10000   # publish 10,000 messages per second per pod
+
+hops:
+  - name: publish-to-kafka
+    destination:
+      type: kafka
+      topic: perf-test-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: exists
+```
+
+### Flow Control – Step Ramp-Up
+
+```yaml
+name: step-ramp-flow
+
+flow_control:
+  rate_per_second: 1000          # initial rate: 1,000 msg/s
+  step:
+    step_size: 100               # increase by 100 msg/s per interval
+    step_interval_seconds: 30    # step up every 30 seconds
+    max_rate: 5000               # required: cap at 5,000 msg/s
+
+hops:
+  - name: publish-to-kafka
+    destination:
+      type: kafka
+      topic: perf-test-topic
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: exists
+```
+
 ## CLI Commands
 
 ### run
@@ -408,17 +477,25 @@ The tool tracks:
 pub_sub_perf_tool/
 ├── __init__.py
 ├── base.py              # Base abstractions
-├── flow_engine.py       # Flow execution engine
+├── flow_engine.py       # Flow execution engine (includes RateLimiter)
 ├── cli.py              # Command-line interface
-└── clients/
+├── clients/
+│   ├── __init__.py
+│   ├── kafka_client.py
+│   ├── pulsar_client.py
+│   ├── rabbitmq_client.py
+│   ├── iggy_client.py
+│   ├── eventhubs_client.py
+│   ├── googlepubsub_client.py
+│   └── streamnative_client.py
+├── serialization/
+│   ├── __init__.py
+│   └── avro.py          # Avro serialization support
+└── timeline/
     ├── __init__.py
-    ├── kafka_client.py
-    ├── pulsar_client.py
-    ├── rabbitmq_client.py
-    ├── iggy_client.py
-    ├── eventhubs_client.py
-    ├── googlepubsub_client.py
-    └── streamnative_client.py
+    ├── capture.py        # Timeline capture
+    ├── cli.py            # Timeline CLI commands
+    └── timeline.py       # Timeline replay
 ```
 
 ### Running Tests
