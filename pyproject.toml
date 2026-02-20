@@ -19,6 +19,7 @@ dependencies = [
     "google-cloud-pubsub>=2.18.0",
     "msgpack>=1.0.0",
     "zstandard>=0.21.0",
+    "fastavro>=1.9.7",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,92 @@
+# Kafka flow using Avro-encoded messages
+#
+# Demonstrates how to:
+#   1. Publish Avro-serialised messages to a Kafka topic.
+#   2. Validate that consumed messages decode correctly against the schema.
+#
+# Usage (encode the message before publishing via the CLI or your own code):
+#
+#   python - <<'EOF'
+#   from pub_sub_perf_tool.serialization.avro import encode
+#   schema = {
+#       "type": "record", "name": "SensorEvent", "namespace": "com.example",
+#       "fields": [
+#           {"name": "sensor_id",     "type": "string"},
+#           {"name": "temperature",   "type": "float"},
+#           {"name": "timestamp_ms",  "type": "long"},
+#           {"name": "active",        "type": "boolean"},
+#       ],
+#   }
+#   raw = encode({"sensor_id": "s1", "temperature": 22.5,
+#                 "timestamp_ms": 1700000000000, "active": True}, schema)
+#   with open("/tmp/sensor_event.avro", "wb") as f:
+#       f.write(raw)
+#   EOF
+#
+#   pub-sub-perf run examples/avro-kafka-flow.yaml \
+#       --message-file /tmp/sensor_event.avro
+
+name: avro-kafka-flow
+message_headers:
+  content-type: application/avro
+  source: perf-tool
+
+hops:
+  # First hop: publish Avro-encoded message to Kafka
+  - name: publish-avro
+    destination:
+      type: kafka
+      topic: avro-sensor-events
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: avro_schema
+      params:
+        schema:
+          type: record
+          name: SensorEvent
+          namespace: com.example
+          fields:
+            - name: sensor_id
+              type: string
+            - name: temperature
+              type: float
+            - name: timestamp_ms
+              type: long
+            - name: active
+              type: boolean
+        required_fields:
+          - sensor_id
+          - temperature
+
+  # Second hop: consume from Kafka and re-publish to a downstream topic
+  - name: forward-avro
+    source: "hop: publish-avro"
+    destination:
+      type: kafka
+      topic: avro-sensor-events-processed
+      config:
+        bootstrap_servers:
+          - localhost:9092
+    validation:
+      type: avro_schema
+      params:
+        schema:
+          type: record
+          name: SensorEvent
+          namespace: com.example
+          fields:
+            - name: sensor_id
+              type: string
+            - name: temperature
+              type: float
+            - name: timestamp_ms
+              type: long
+            - name: active
+              type: boolean
+        required_fields:
+          - sensor_id
+          - temperature
+          - timestamp_ms
+          - active
