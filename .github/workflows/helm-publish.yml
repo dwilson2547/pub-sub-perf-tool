@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "helm/**"
+  pull_request:
+    paths:
+      - "helm/**"
 
 jobs:
   release:
@@ -25,7 +28,15 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
+      - name: Lint Helm chart
+        run: helm lint helm/pub-sub-perf-tool
+
+      - name: Package Helm chart (snapshot)
+        if: github.event_name == 'pull_request'
+        run: helm package helm/pub-sub-perf-tool --destination /tmp/helm-snapshot
+
       - name: Run chart-releaser
+        if: github.event_name != 'pull_request'
         uses: helm/chart-releaser-action@v1.6.0
         with:
           charts_dir: helm
@@ -33,6 +44,7 @@ jobs:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Add artifacthub-repo.yml to GitHub Pages
+        if: github.event_name != 'pull_request'
         run: |
           cp $GITHUB_WORKSPACE/artifacthub-repo.yml /tmp/artifacthub-repo.yml
           git fetch origin gh-pages || true
