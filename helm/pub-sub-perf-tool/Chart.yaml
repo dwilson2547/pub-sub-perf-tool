@@ -1,0 +1,24 @@
+apiVersion: v2
+name: pub-sub-perf-tool
+description: A generic pub-sub performance testing tool with validation support for Kafka, Pulsar, RabbitMQ, and more.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kafka
+  - pulsar
+  - rabbitmq
+  - performance
+  - pub-sub
+  - messaging
+home: https://github.com/dwilson2547/pub-sub-perf-tool
+sources:
+  - https://github.com/dwilson2547/pub-sub-perf-tool
+maintainers:
+  - name: dwilson2547
+    url: https://github.com/dwilson2547
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/links: |
+    - name: Source
+      url: https://github.com/dwilson2547/pub-sub-perf-tool

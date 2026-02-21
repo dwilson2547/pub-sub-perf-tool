@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "pub-sub-perf-tool.fullname" . }}
+  labels:
+    {{- include "pub-sub-perf-tool.labels" . | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.backoffLimit }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "pub-sub-perf-tool.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "pub-sub-perf-tool.serviceAccountName" . }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: {{ .Values.restartPolicy }}
+      volumes:
+        - name: flow-config
+          configMap:
+            name: {{ include "pub-sub-perf-tool.fullname" . }}-flow
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: {{ include "pub-sub-perf-tool.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - run
+            - /config/flow.yaml
+            - --message
+            - {{ .Values.run.message | quote }}
+            - --count
+            - {{ .Values.run.count | quote }}
+            - --output
+            - {{ .Values.run.output | quote }}
+            {{- if .Values.run.key }}
+            - --key
+            - {{ .Values.run.key | quote }}
+            {{- end }}
+            {{- if .Values.run.messageFile }}
+            - --message-file
+            - {{ .Values.run.messageFile | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: flow-config
+              mountPath: /config
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

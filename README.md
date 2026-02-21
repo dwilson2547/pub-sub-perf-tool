@@ -53,9 +53,47 @@ A generic pub-sub performance testing tool with a focus on validation across mul
 
 ## Installation
 
+### Local (pip)
+
 ```bash
 pip install -r requirements.txt
 pip install -e .
+```
+
+### Docker
+
+Pre-built images are published to [Docker Hub](https://hub.docker.com/r/dwilson2547/pub-sub-perf-tool).
+
+```bash
+# Pull the latest image
+docker pull dwilson2547/pub-sub-perf-tool:latest
+
+# Run a flow (mount your flow file into the container)
+docker run --rm \
+  -v $(pwd)/my-flow.yaml:/config/flow.yaml \
+  dwilson2547/pub-sub-perf-tool:latest \
+  run /config/flow.yaml --message "Hello World" --count 10
+```
+
+### Kubernetes (Helm)
+
+The Helm chart is published to [ArtifactHub](https://artifacthub.io/packages/helm/pub-sub-perf-tool/pub-sub-perf-tool).
+
+```bash
+# Add the Helm repository
+helm repo add pub-sub-perf-tool https://dwilson2547.github.io/pub-sub-perf-tool
+helm repo update
+
+# Install the chart (runs a Kubernetes Job)
+helm install my-perf-test pub-sub-perf-tool/pub-sub-perf-tool \
+  --set run.message="Hello World" \
+  --set run.count=100
+
+# Or install with a custom flow configuration
+helm install my-perf-test pub-sub-perf-tool/pub-sub-perf-tool \
+  --set-file flowConfig=my-flow.yaml \
+  --set run.message="Hello World" \
+  --set run.count=100
 ```
 
 ## Quick Start
@@ -571,6 +609,50 @@ pytest
 ```
 
 **Note:** Integration tests are slower than unit tests as they start Docker containers and perform actual network operations. See `tests/integration/README.md` for detailed documentation.
+
+## Repository Setup: Docker Hub & ArtifactHub
+
+### Docker Hub Setup
+
+The Docker image is automatically built and pushed to Docker Hub whenever a commit lands on `main` or a version tag (e.g. `v1.0.0`) is pushed.
+
+**Steps to configure Docker Hub publishing:**
+
+1. Create a [Docker Hub](https://hub.docker.com/) account and create a repository named `pub-sub-perf-tool`.
+2. Generate an access token: **Account Settings → Security → New Access Token** (Read, Write, Delete permissions).
+3. Add the following secrets in your GitHub repository (**Settings → Secrets and variables → Actions**):
+   - `DOCKERHUB_USERNAME` – your Docker Hub username
+   - `DOCKERHUB_TOKEN` – the access token generated above
+4. The workflow at `.github/workflows/docker-publish.yml` will then automatically build and publish images.
+
+### ArtifactHub & Helm Chart Setup
+
+The Helm chart is published via [GitHub Pages](https://pages.github.com/) and indexed by [ArtifactHub](https://artifacthub.io/).
+
+**Steps to configure Helm chart publishing:**
+
+1. **Enable GitHub Pages** in your repository:
+   - Go to **Settings → Pages**.
+   - Set the source to **Deploy from a branch**, branch `gh-pages`, root `/`.
+   - Save. GitHub will create the `gh-pages` branch on the first workflow run.
+
+2. **Trigger the Helm workflow** by pushing a change to any file under `helm/`. The workflow at `.github/workflows/helm-publish.yml` will:
+   - Package the Helm chart using [chart-releaser](https://github.com/helm/chart-releaser-action).
+   - Create a GitHub Release for the chart.
+   - Update the `index.yaml` on the `gh-pages` branch so the chart repository is discoverable.
+   - Copy `artifacthub-repo.yml` to the `gh-pages` branch root.
+
+3. **Register the repository on ArtifactHub**:
+   - Sign in to [ArtifactHub](https://artifacthub.io/).
+   - Go to **Control Panel → Add repository**.
+   - Fill in the details:
+     - **Kind**: Helm charts
+     - **Name**: `pub-sub-perf-tool`
+     - **Display name**: Pub-Sub Performance Tool
+     - **URL**: `https://dwilson2547.github.io/pub-sub-perf-tool`
+   - Click **Add**. ArtifactHub will crawl the index at the GitHub Pages URL.
+
+4. *(Optional)* To verify ownership on ArtifactHub, ensure `artifacthub-repo.yml` is present at the root of the `gh-pages` branch (the workflow does this automatically after the first successful Helm release).
 
 ## License
 
