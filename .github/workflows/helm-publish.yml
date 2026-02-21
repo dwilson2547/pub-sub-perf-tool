@@ -20,10 +20,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: Get chart version
+        id: version
         run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          VERSION=$(grep '^version:' helm/pub-sub-perf-tool/Chart.yaml | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: tag-check
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -31,26 +43,26 @@ jobs:
       - name: Lint Helm chart
         run: helm lint helm/pub-sub-perf-tool
 
-      - name: Package Helm chart (snapshot)
-        if: github.event_name == 'pull_request'
-        run: helm package helm/pub-sub-perf-tool --destination /tmp/helm-snapshot
+      - name: Log in to Docker Hub Helm registry
+        if: github.event_name != 'pull_request' && steps.tag-check.outputs.exists == 'false'
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | helm registry login registry-1.docker.io --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-      - name: Run chart-releaser
-        if: github.event_name != 'pull_request'
-        uses: helm/chart-releaser-action@v1.6.0
-        with:
-          charts_dir: helm
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Add artifacthub-repo.yml to GitHub Pages
-        if: github.event_name != 'pull_request'
+      - name: Package Helm chart
+        if: github.event_name != 'pull_request' && steps.tag-check.outputs.exists == 'false'
         run: |
-          cp $GITHUB_WORKSPACE/artifacthub-repo.yml /tmp/artifacthub-repo.yml
-          git fetch origin gh-pages || true
-          git checkout gh-pages || git checkout --orphan gh-pages
-          cp /tmp/artifacthub-repo.yml .
-          git add artifacthub-repo.yml
-          git diff --cached --quiet || git commit -m "Add artifacthub-repo.yml"
-          git push origin gh-pages
-        continue-on-error: true
+          helm package helm/pub-sub-perf-tool \
+            --version ${{ steps.version.outputs.version }} \
+            --app-version ${{ steps.version.outputs.version }}
+
+      - name: Push Helm chart to Docker Hub OCI registry
+        if: github.event_name != 'pull_request' && steps.tag-check.outputs.exists == 'false'
+        run: |
+          helm push pub-sub-perf-tool-${{ steps.version.outputs.version }}.tgz \
+            oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}
+
+      - name: Upload Helm chart to GitHub Release
+        if: github.event_name != 'pull_request' && steps.tag-check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          files: pub-sub-perf-tool-${{ steps.version.outputs.version }}.tgz
