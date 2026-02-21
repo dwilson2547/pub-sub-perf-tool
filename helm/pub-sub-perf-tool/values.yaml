@@ -1,0 +1,67 @@
+# Default values for pub-sub-perf-tool.
+
+image:
+  repository: dwilson2547/pub-sub-perf-tool
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+
+# Flow configuration to mount into the Job.
+# Set flowConfig to the YAML content of your flow file.
+flowConfig: |
+  name: example-flow
+  hops:
+    - name: publish-to-kafka
+      destination:
+        type: kafka
+        topic: test-topic
+        config:
+          bootstrap_servers:
+            - kafka:9092
+
+# Arguments passed to `pub-sub-perf run`.
+run:
+  # Message content to send (used as --message flag).
+  message: "Hello World"
+  # Number of messages to send.
+  count: 1
+  # Output format: table or json.
+  output: table
+  # Optional: path to a message file inside the container.
+  # messageFile: ""
+  # Optional: message key.
+  # key: ""
+
+# Resource requests/limits for the Job's container.
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 256Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# Job restart policy.
+restartPolicy: Never
+
+# Number of retries on failure.
+backoffLimit: 0
+
+serviceAccount:
+  # Specifies whether a service account should be created.
+  create: false
+  # Annotations to add to the service account.
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template.
+  name: ""
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
